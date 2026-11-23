@@ -54,10 +54,23 @@ def calculate_sha256(file_path: Path) -> str:
     return hasher.hexdigest()
 
 
-def download_file(url: str, destination: Path, max_retries: int = 3, delay: float = 1.0) -> Dict[str, Any]:
+def download_file(url: str, destination: Path, max_retries: int = 3, delay: float = 1.0, skip_existing: bool = True) -> Dict[str, Any]:
     """Download a remote file and return provenance metadata."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     
+    # Check if already downloaded
+    if skip_existing and destination.exists() and destination.stat().st_size > 0:
+        logger.info(f"Skipping already downloaded: {destination.name} ({destination.stat().st_size} bytes)")
+        return {
+            "url": url,
+            "local_path": str(destination.relative_to(destination.parents[2])),
+            "size_bytes": destination.stat().st_size,
+            "sha256": calculate_sha256(destination),
+            "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
+            "status": "success",
+            "cached": True
+        }
+
     headers = {"User-Agent": "TouchlineLM-Research-Agent/1.0"}
     req = urllib.request.Request(url, headers=headers)
     
@@ -78,7 +91,8 @@ def download_file(url: str, destination: Path, max_retries: int = 3, delay: floa
                 "size_bytes": file_size,
                 "sha256": sha256,
                 "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
-                "status": "success"
+                "status": "success",
+                "cached": False
             }
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             logger.warning(f"Attempt {attempt}/{max_retries} failed for {url}: {e}")
@@ -99,9 +113,10 @@ def download_statsbomb_sample(
     output_dir: Path,
     comp_id: int = DEFAULT_STATSBOMB_COMPETITION,
     season_id: int = DEFAULT_STATSBOMB_SEASON,
-    match_ids: Optional[List[int]] = None
+    match_ids: Optional[List[int]] = None,
+    all_competition_matches: bool = False
 ) -> List[Dict[str, Any]]:
-    """Download sample StatsBomb Open Data files."""
+    """Download StatsBomb Open Data files."""
     manifest_records = []
     sb_dir = output_dir / "statsbomb"
 
@@ -115,8 +130,16 @@ def download_statsbomb_sample(
     matches_dest = sb_dir / "matches" / f"{comp_id}_{season_id}.json"
     manifest_records.append(download_file(matches_url, matches_dest))
 
-    # 3. Events and lineups for target sample matches
-    matches_to_fetch = match_ids or DEFAULT_SAMPLE_MATCH_IDS
+    # Determine matches to fetch
+    if all_competition_matches:
+        with open(matches_dest, "r", encoding="utf-8") as f:
+            matches_data = json.load(f)
+        matches_to_fetch = [m["match_id"] for m in matches_data]
+        logger.info(f"Targeting all {len(matches_to_fetch)} matches for competition {comp_id}, season {season_id}")
+    else:
+        matches_to_fetch = match_ids or DEFAULT_SAMPLE_MATCH_IDS
+
+    # 3. Events and lineups for target matches
     for m_id in matches_to_fetch:
         event_url = f"{STATSBOMB_BASE_URL}/events/{m_id}.json"
         event_dest = sb_dir / "events" / f"{m_id}.json"
@@ -156,6 +179,8 @@ def main() -> None:
                         help="StatsBomb season ID (default: 106 - 2022)")
     parser.add_argument("--match-ids", nargs="*", type=int, default=DEFAULT_SAMPLE_MATCH_IDS,
                         help="StatsBomb match IDs to download events and lineups for")
+    parser.add_argument("--all-matches", action="store_true",
+                        help="Download all matches available for the specified competition and season")
     
     args = parser.parse_args()
     
@@ -169,7 +194,9 @@ def main() -> None:
 
     if args.source in ["statsbomb", "all"]:
         logger.info("Downloading StatsBomb Open Data sample...")
-        sb_manifest = download_statsbomb_sample(raw_dir, args.comp_id, args.season_id, args.match_ids)
+        sb_manifest = download_statsbomb_sample(
+            raw_dir, args.comp_id, args.season_id, args.match_ids, all_competition_matches=args.all_matches
+        )
         all_manifest.extend(sb_manifest)
 
     if args.source in ["football_data", "all"]:

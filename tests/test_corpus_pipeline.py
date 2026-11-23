@@ -39,7 +39,7 @@ def test_progressive_action_logic():
     # Pass into penalty box from outside
     assert is_progressive_pass(start_x=80, start_y=40, end_x=105, end_y=40) is True
 
-    # Pass moving >= 25% closer to goal
+    # Pass moving >= 25% closer to goal originating outside defensive third
     # Start at (60, 40) -> dist = 60
     # End at (85, 40) -> dist = 35 -> (60 - 35)/60 = 41.7% reduction >= 25%
     assert is_progressive_pass(start_x=60, start_y=40, end_x=85, end_y=40) is True
@@ -47,9 +47,17 @@ def test_progressive_action_logic():
     # Backward / lateral pass
     assert is_progressive_pass(start_x=80, start_y=40, end_x=70, end_y=40) is False
 
+    # Clearance / Deep defensive third exclusion (start_x < 40)
+    # Even if distance is reduced by >25%, deep defensive clearances must be excluded
+    assert is_progressive_pass(start_x=25, start_y=40, end_x=65, end_y=40) is False
+    assert is_progressive_pass(start_x=60, start_y=40, end_x=90, end_y=40, pass_type="Clearance") is False
+
     # Progressive carry advancing >= 10 yards into attacking territory
     assert is_progressive_carry(start_x=50, start_y=30, end_x=65, end_y=30) is True
     assert is_progressive_carry(start_x=50, start_y=30, end_x=52, end_y=30) is False
+
+    # Carry confined to defensive third
+    assert is_progressive_carry(start_x=20, start_y=30, end_x=32, end_y=30) is False
 
 
 def test_match_extraction_and_metrics(raw_data_dir):

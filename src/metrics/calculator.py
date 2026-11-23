@@ -20,12 +20,31 @@ def is_inside_box(x: float, y: float) -> bool:
     return x >= 102.0 and 18.0 <= y <= 62.0
 
 
-def is_progressive_pass(start_x: float, start_y: float, end_x: float, end_y: float) -> bool:
+def is_progressive_pass(
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    pass_type: Optional[str] = None
+) -> bool:
     """
     Standard Football Analytics definition of a progressive pass:
     A completed forward pass that moves the ball at least 25% closer to the
     opponent's goal center, OR delivers the ball into the opponent's penalty box.
+    
+    Refinements & Exclusions:
+    - Excludes defensive clearance events or passes marked as clearances.
+    - Excludes passes originating in own defensive third (start_x < 40.0)
+      to prevent deep defensive clearances from inflating progression metrics.
     """
+    # Explicitly exclude clearance pass types
+    if pass_type and "clearance" in pass_type.lower():
+        return False
+
+    # Exclude passes originating in own defensive third (x < 40.0)
+    if start_x < 40.0:
+        return False
+
     d_start = distance_to_goal(start_x, start_y)
     d_end = distance_to_goal(end_x, end_y)
 
@@ -45,12 +64,14 @@ def is_progressive_carry(start_x: float, start_y: float, end_x: float, end_y: fl
     Standard definition of a progressive carry:
     A continuous ball carry advancing forward towards the opponent goal line
     by at least 10 yards, or entering the penalty box.
+    
+    Excludes carries confined entirely to the defensive third (end_x <= 40.0).
     """
     if not is_inside_box(start_x, start_y) and is_inside_box(end_x, end_y):
         return True
 
     dx = end_x - start_x
-    if dx >= 10.0 and end_x > 40.0:
+    if dx >= 10.0 and end_x > 40.0 and start_x >= 35.0:
         return True
 
     return False
@@ -278,7 +299,8 @@ class MetricsCalculator:
 
                     # Progressive pass calculation
                     if len(loc) >= 2 and len(end_loc) >= 2:
-                        if is_progressive_pass(loc[0], loc[1], end_loc[0], end_loc[1]):
+                        p_type = pass_sub.get("type", {}).get("name")
+                        if is_progressive_pass(loc[0], loc[1], end_loc[0], end_loc[1], pass_type=p_type):
                             t_metrics.progressive_passes += 1
                             if p_metrics:
                                 p_metrics.progressive_passes += 1

@@ -151,9 +151,9 @@ class FactChecker:
                 )
             local_checks += 3
 
-        # Pattern: registered {shots_total} total shots ({shots_on_target} on target), scoring {goals_scored} goals from an accumulated expected goals value of {expected_goals} xG
+        # Pattern: registered/recording {shots_total} total shots ({shots_on_target} on target), scoring {goals_scored} goals from an accumulated expected goals value of {expected_goals} xG
         shot_pat = re.compile(
-            rf"registered (\d+) total shots \((\d+) on target\), scoring (\d+) goals from an accumulated expected goals value of (\d+\.?\d*) xG"
+            rf"(?:registered|recording) (\d+) total shots \((\d+) on target\), scoring (\d+) goals from an accumulated expected goals value of (\d+\.?\d*) xG"
         )
         m_s = shot_pat.search(content)
         if m_s:
