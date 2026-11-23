@@ -418,11 +418,14 @@ class MetricsCalculator:
             pm.expected_goals = round(pm.expected_goals, 2)
             pm.expected_assists = round(pm.expected_assists, 2)
 
+        stage_val = meta_info.get("competition_stage", "Match")
+        stage_name = stage_val.get("name", "Match") if isinstance(stage_val, dict) else str(stage_val)
+
         fixture_str = f"{home_name} vs {away_name}"
         return ExtractedMatchData(
             match_id=match_id,
             fixture=fixture_str,
-            competition_stage=meta_info.get("competition_stage", {}).get("name", "Match"),
+            competition_stage=stage_name,
             match_date=meta_info.get("match_date", "Unknown"),
             home_team_name=home_name,
             away_team_name=away_name,

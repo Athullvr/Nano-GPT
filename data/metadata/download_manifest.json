@@ -1,12 +1,12 @@
 {
-  "generated_at_utc": "2026-11-23T13:12:40.224662+00:00",
+  "generated_at_utc": "2026-11-23T13:29:49.019418+00:00",
   "sources": [
     {
       "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/competitions.json",
       "local_path": "raw/statsbomb/competitions.json",
       "size_bytes": 34887,
       "sha256": "e6cd42f5d8956d6aa30fb917ce8d4c3b3df1879a93f02f8feba820930a6971fa",
-      "downloaded_at_utc": "2026-11-23T13:12:04.650314+00:00",
+      "downloaded_at_utc": "2026-11-23T13:24:23.860877+00:00",
       "status": "success"
     },
     {
@@ -14,7 +14,7 @@
       "local_path": "statsbomb/matches/43_106.json",
       "size_bytes": 119132,
       "sha256": "b9d7516dc9919a825f04c204ca85487958c8a2431e84140a48e944934661efc7",
-      "downloaded_at_utc": "2026-11-23T13:12:05.050665+00:00",
+      "downloaded_at_utc": "2026-11-23T13:24:54.227969+00:00",
       "status": "success"
     },
     {
@@ -22,7 +22,7 @@
       "local_path": "statsbomb/events/3869685.json",
       "size_bytes": 3757121,
       "sha256": "a0b0036d50c10a4c8879d1ee9f24a7502ec2cfb264a61951c8d500dfc897ec35",
-      "downloaded_at_utc": "2026-11-23T13:12:05.852619+00:00",
+      "downloaded_at_utc": "2026-11-23T13:24:54.899370+00:00",
       "status": "success"
     },
     {
@@ -30,7 +30,215 @@
       "local_path": "statsbomb/lineups/3869685.json",
       "size_bytes": 28432,
       "sha256": "2b00c4cbf027b36ae2ce99f183a0943c649bb5bdcb8324683a8603785beffed5",
-      "downloaded_at_utc": "2026-11-23T13:12:36.242066+00:00",
+      "downloaded_at_utc": "2026-11-23T13:24:55.303460+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869519.json",
+      "local_path": "statsbomb/events/3869519.json",
+      "size_bytes": 3225242,
+      "sha256": "4ee7a0a1484045f49d42e74b7ca1881446ca7245087c6b6d47e536d47d58da6d",
+      "downloaded_at_utc": "2026-11-23T13:25:26.249142+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869519.json",
+      "local_path": "statsbomb/lineups/3869519.json",
+      "size_bytes": 24059,
+      "sha256": "887bd2914c6eb9ab37d6ecfa6958c07562a7d69197ade5c6fabbf7228246c5bd",
+      "downloaded_at_utc": "2026-11-23T13:25:56.625042+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869552.json",
+      "local_path": "statsbomb/events/3869552.json",
+      "size_bytes": 3001771,
+      "sha256": "a8d0c4c65503004d6e12403815b21f65c101b394b7b42bd6c84fc26357d3868e",
+      "downloaded_at_utc": "2026-11-23T13:25:57.480482+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869552.json",
+      "local_path": "statsbomb/lineups/3869552.json",
+      "size_bytes": 23531,
+      "sha256": "ebacdba884e59e2e373bf7fdcde49d55e777713d2499db465340fd8be2e33706",
+      "downloaded_at_utc": "2026-11-23T13:25:57.957461+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869321.json",
+      "local_path": "statsbomb/events/3869321.json",
+      "size_bytes": 4007550,
+      "sha256": "dd0472e758207eea4dc1726c778f506e91c1f630b3020b101cf111267c2621ed",
+      "downloaded_at_utc": "2026-11-23T13:26:29.098209+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869321.json",
+      "local_path": "statsbomb/lineups/3869321.json",
+      "size_bytes": 29944,
+      "sha256": "c3e75882a4f22945a1843392cfbdf751f4dd171e474ed83e189f1e73037d9d33",
+      "downloaded_at_utc": "2026-11-23T13:26:59.485013+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869354.json",
+      "local_path": "statsbomb/events/3869354.json",
+      "size_bytes": 2744507,
+      "sha256": "50c32503dc49d25430e9cbf254160bce7e1c7ee0975be826dbf4da413f4c280e",
+      "downloaded_at_utc": "2026-11-23T13:27:00.206277+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869354.json",
+      "local_path": "statsbomb/lineups/3869354.json",
+      "size_bytes": 19550,
+      "sha256": "526af08fd372b2f8530dfdd8e4dd523cf9b2efc9eabd2afb9d710895dda9b828",
+      "downloaded_at_utc": "2026-11-23T13:27:00.570245+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869420.json",
+      "local_path": "statsbomb/events/3869420.json",
+      "size_bytes": 4348491,
+      "sha256": "0936838f0a1a27df11352a4b96c6265b3ef89b164ff96817e46ae6619f0ab164",
+      "downloaded_at_utc": "2026-11-23T13:27:03.910408+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869420.json",
+      "local_path": "statsbomb/lineups/3869420.json",
+      "size_bytes": 24352,
+      "sha256": "7adac6a5d1afcfe0934bbd05e689eb6f27057ade8e6e332fcbcdfecd4a31f3e0",
+      "downloaded_at_utc": "2026-11-23T13:27:04.298071+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869486.json",
+      "local_path": "statsbomb/events/3869486.json",
+      "size_bytes": 2901963,
+      "sha256": "455127b456021593874476ee8b5dad01b0166b8da814c095300b6ed608a08993",
+      "downloaded_at_utc": "2026-11-23T13:27:35.134774+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869486.json",
+      "local_path": "statsbomb/lineups/3869486.json",
+      "size_bytes": 27536,
+      "sha256": "78659c3285c14d81ea21598b96958345c51107680de79f28b9359f4f7b8c2490",
+      "downloaded_at_utc": "2026-11-23T13:28:05.512623+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869254.json",
+      "local_path": "statsbomb/events/3869254.json",
+      "size_bytes": 2970822,
+      "sha256": "8317fefc7c2c0e4e072064b844077849856860ef81ef29c97916fd1c19ba7d44",
+      "downloaded_at_utc": "2026-11-23T13:28:06.323509+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869254.json",
+      "local_path": "statsbomb/lineups/3869254.json",
+      "size_bytes": 25693,
+      "sha256": "645de5522e63633e80819168221410a3dd7f06e07527aed17edc70308ae4b7aa",
+      "downloaded_at_utc": "2026-11-23T13:28:06.707550+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869253.json",
+      "local_path": "statsbomb/events/3869253.json",
+      "size_bytes": 3443303,
+      "sha256": "c6081e65da563f21c7f902bcf2f70d4fe26f4ac7d34a867388c1d5e6f21091d5",
+      "downloaded_at_utc": "2026-11-23T13:28:08.829602+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869253.json",
+      "local_path": "statsbomb/lineups/3869253.json",
+      "size_bytes": 23061,
+      "sha256": "e3f4ed56925aa46344679be7606e8f8db9925d039b0a176fc4ad15f45d472497",
+      "downloaded_at_utc": "2026-11-23T13:28:09.250597+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3869220.json",
+      "local_path": "statsbomb/events/3869220.json",
+      "size_bytes": 3975140,
+      "sha256": "ca1d27f3a1b2454bf9d0b0b5e44aedecf01f39dde8ee1f3b6198acad3f24f966",
+      "downloaded_at_utc": "2026-11-23T13:28:40.355449+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3869220.json",
+      "local_path": "statsbomb/lineups/3869220.json",
+      "size_bytes": 26259,
+      "sha256": "3cda245c7c3786fbbb83d931d2ba247cde09371142dbc1e54c6aee9e0bf1c6e3",
+      "downloaded_at_utc": "2026-11-23T13:28:40.859533+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3857271.json",
+      "local_path": "statsbomb/events/3857271.json",
+      "size_bytes": 3063347,
+      "sha256": "3195e45476b96c3257e15043ac4fe17bbb640c548a4edb74d2c3b3eb8b3519e3",
+      "downloaded_at_utc": "2026-11-23T13:28:42.408601+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3857271.json",
+      "local_path": "statsbomb/lineups/3857271.json",
+      "size_bytes": 25857,
+      "sha256": "6882a76ac38087cd8e3fac61c855ab4a575d5a4cd003ded84dcf078b22d020e0",
+      "downloaded_at_utc": "2026-11-23T13:28:42.909135+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3857255.json",
+      "local_path": "statsbomb/events/3857255.json",
+      "size_bytes": 3753326,
+      "sha256": "dec08979312350b0c3910b5ed15c7e4f7c10f438b733be0231d47a487b74e7a0",
+      "downloaded_at_utc": "2026-11-23T13:28:44.713706+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3857255.json",
+      "local_path": "statsbomb/lineups/3857255.json",
+      "size_bytes": 22414,
+      "sha256": "94bf73899cf687532a5568a460217dfdb6d458f7a033d7b083e390375b43a298",
+      "downloaded_at_utc": "2026-11-23T13:29:15.115646+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3857263.json",
+      "local_path": "statsbomb/events/3857263.json",
+      "size_bytes": 3027325,
+      "sha256": "16617ba95154db870ba833156348acfafa037730391ec0f8fe3f2635eba135ad",
+      "downloaded_at_utc": "2026-11-23T13:29:45.987596+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3857263.json",
+      "local_path": "statsbomb/lineups/3857263.json",
+      "size_bytes": 22626,
+      "sha256": "fbe5d4f0875e9f7c1ebe2dee3aa29f2a21af15bc00229c6d69d8465ae1175a3a",
+      "downloaded_at_utc": "2026-11-23T13:29:46.370770+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/events/3857300.json",
+      "local_path": "statsbomb/events/3857300.json",
+      "size_bytes": 2865394,
+      "sha256": "76fa92d3cc2d235a47eed0a7a722332a7c3ec5d3386a8785102eeec69db80ee8",
+      "downloaded_at_utc": "2026-11-23T13:29:47.306082+00:00",
+      "status": "success"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/statsbomb/open-data/master/data/lineups/3857300.json",
+      "local_path": "statsbomb/lineups/3857300.json",
+      "size_bytes": 25095,
+      "sha256": "70ceff291a4b74e8a33d8eb05dc1d4c03ba69f2576a57b43992abdeea2264616",
+      "downloaded_at_utc": "2026-11-23T13:29:47.680075+00:00",
       "status": "success"
     },
     {
@@ -38,7 +246,7 @@
       "local_path": "statsbomb/events/3857256.json",
       "size_bytes": 2758185,
       "sha256": "e1c5c6d486cac99e336669951946b5d31983b28285089470943f42d16ced7337",
-      "downloaded_at_utc": "2026-11-23T13:12:37.033428+00:00",
+      "downloaded_at_utc": "2026-11-23T13:29:48.658442+00:00",
       "status": "success"
     },
     {
@@ -46,15 +254,7 @@
       "local_path": "statsbomb/lineups/3857256.json",
       "size_bytes": 22488,
       "sha256": "740babcf7b26703ca516f10a21a26f2ec627e6146e12bb1cd7c57280b8d63577",
-      "downloaded_at_utc": "2026-11-23T13:12:37.407260+00:00",
-      "status": "success"
-    },
-    {
-      "url": "https://www.football-data.co.uk/mmz4281/2324/E0.csv",
-      "local_path": "raw/football_data/E0_2324.csv",
-      "size_bytes": 172196,
-      "sha256": "b2e057b0ed959f198b0f63d2391c01239f3608e6de5db68edab3f88e04d07ff3",
-      "downloaded_at_utc": "2026-11-23T13:12:40.224588+00:00",
+      "downloaded_at_utc": "2026-11-23T13:29:49.019358+00:00",
       "status": "success"
     }
   ]

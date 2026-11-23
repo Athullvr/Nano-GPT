@@ -19,6 +19,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List
 
+# Ensure repository root is on sys.path
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from src.extraction.match_extractor import StatsBombExtractor
 from src.metrics.calculator import ExtractedMatchData, MetricsCalculator, TeamMatchMetrics, PlayerMatchMetrics
 from src.corpus.generator import CorpusGenerator
