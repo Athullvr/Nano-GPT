@@ -1,31 +1,35 @@
 """
-TouchlineLM - Phase 2 End-to-End Corpus Engineering Pipeline
+TouchlineLM - Phase 3A Full Corpus Processing and Dataset Preparation Pipeline
 Orchestrates:
-1. Batch extraction across all sample matches
-2. Deterministic metrics calculation
-3. Intermediate data persistence (data/intermediate/)
-4. Multi-tier text generation (data/processed/corpus/)
+1. Full batch extraction across all 64 FIFA World Cup 2022 matches
+2. Deterministic metrics calculation (with corrected clearance & progression logic)
+3. Intermediate dataset persistence (data/intermediate/)
+4. Multi-tier text generation (with syntactic permutations & zero-omission)
 5. 100% automated statistical fact-checking and validation
-6. Text diversity and vocabulary analysis
+6. Actual baseline tokenizer token counting via tiktoken (GPT-2)
+7. Match-level grouping for train/validation/test splits (zero leakage)
+8. Text diversity, vocabulary, and n-gram repetition analysis
 """
 
 import argparse
 import json
 import logging
+import random
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 # Ensure repository root is on sys.path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import tiktoken
 from src.extraction.match_extractor import StatsBombExtractor
-from src.metrics.calculator import ExtractedMatchData, MetricsCalculator, TeamMatchMetrics, PlayerMatchMetrics
+from src.metrics.calculator import ExtractedMatchData, MetricsCalculator
 from src.corpus.generator import CorpusGenerator
 from src.validation.fact_checker import FactChecker
 
@@ -37,8 +41,8 @@ logging.basicConfig(
 logger = logging.getLogger("process_corpus")
 
 
-def analyze_corpus_diversity(texts: List[str]) -> Dict[str, Any]:
-    """Calculate lexical diversity, word counts, and n-gram statistics."""
+def analyze_corpus_diversity(texts: List[str], enc: tiktoken.Encoding) -> Dict[str, Any]:
+    """Calculate lexical diversity, word counts, exact tokenizer tokens, and n-gram statistics."""
     total_chars = sum(len(t) for t in texts)
     
     # Tokenize words cleanly (lowercase alphanumeric)
@@ -51,6 +55,9 @@ def analyze_corpus_diversity(texts: List[str]) -> Dict[str, Any]:
     unique_words = set(words)
     vocab_size = len(unique_words)
     ttr = round((vocab_size / total_words) * 100, 2) if total_words > 0 else 0.0
+
+    # Tokenizer-based exact token counts (GPT-2 encoding)
+    total_tokens = sum(len(enc.encode(t)) for t in texts)
 
     # 2-grams and 3-grams
     bigrams = [f"{words[i]} {words[i+1]}" for i in range(len(words) - 1)]
@@ -65,7 +72,7 @@ def analyze_corpus_diversity(texts: List[str]) -> Dict[str, Any]:
     word_freq = Counter(words)
     stop_words = {
         "and", "the", "in", "of", "a", "to", "with", "for", "from", "at", "as", "by", "was",
-        "on", "this", "an", "that", "during", "while", "across", "neither", "during", "or"
+        "on", "this", "an", "that", "during", "while", "across", "neither", "or", "without"
     }
     top_domain_words = [
         {"word": w, "count": c}
@@ -76,7 +83,8 @@ def analyze_corpus_diversity(texts: List[str]) -> Dict[str, Any]:
     return {
         "total_characters": total_chars,
         "total_words": total_words,
-        "estimated_tokens_ratio_0_75": int(total_words * 1.3),
+        "actual_baseline_tokens_gpt2": total_tokens,
+        "tokens_per_word_ratio": round(total_tokens / total_words, 3) if total_words > 0 else 0.0,
         "vocabulary_size": vocab_size,
         "type_token_ratio_ttr_pct": ttr,
         "distinct_bigrams": distinct_bigrams,
@@ -87,14 +95,72 @@ def analyze_corpus_diversity(texts: List[str]) -> Dict[str, Any]:
     }
 
 
+def split_matches_by_stage(
+    matches_dict: Dict[int, ExtractedMatchData],
+    train_ratio: float = 0.75,
+    val_ratio: float = 0.125,
+    test_ratio: float = 0.125,
+    seed: int = 42
+) -> Tuple[List[int], List[int], List[int]]:
+    """
+    Perform match-level splitting stratified by tournament stage.
+    Ensures zero match leakage across splits.
+    """
+    random.seed(seed)
+    stage_groups = defaultdict(list)
+    for m_id, m_data in matches_dict.items():
+        stage_groups[m_data.competition_stage].append(m_id)
+
+    train_ids = []
+    val_ids = []
+    test_ids = []
+
+    for stage, m_ids in sorted(stage_groups.items()):
+        # Shuffle deterministically
+        m_ids_sorted = sorted(m_ids)
+        random.shuffle(m_ids_sorted)
+        n = len(m_ids_sorted)
+
+        if n == 1:
+            # e.g., Final goes to train
+            train_ids.extend(m_ids_sorted)
+        elif n == 2:
+            # 1 to train, 1 to test
+            train_ids.append(m_ids_sorted[0])
+            test_ids.append(m_ids_sorted[1])
+        else:
+            n_val = max(1, round(n * val_ratio))
+            n_test = max(1, round(n * test_ratio))
+            n_train = n - n_val - n_test
+
+            # Adjust if needed
+            if n_train < 1:
+                n_train = 1
+                if n_val > 1:
+                    n_val -= 1
+                elif n_test > 1:
+                    n_test -= 1
+
+            train_ids.extend(m_ids_sorted[:n_train])
+            val_ids.extend(m_ids_sorted[n_train:n_train + n_val])
+            test_ids.extend(m_ids_sorted[n_train + n_val:])
+
+    # Verify no overlaps
+    assert len(set(train_ids) & set(val_ids)) == 0, "Train and Val match collision!"
+    assert len(set(train_ids) & set(test_ids)) == 0, "Train and Test match collision!"
+    assert len(set(val_ids) & set(test_ids)) == 0, "Val and Test match collision!"
+
+    return sorted(train_ids), sorted(val_ids), sorted(test_ids)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Execute Phase 2 Corpus Engineering Pipeline.")
+    parser = argparse.ArgumentParser(description="Execute Phase 3A Corpus Processing Pipeline.")
     parser.add_argument("--raw-dir", type=str, default="data/raw", help="Path to raw data directory")
     parser.add_argument("--intermediate-dir", type=str, default="data/intermediate", help="Intermediate output dir")
     parser.add_argument("--processed-dir", type=str, default="data/processed", help="Processed corpus output dir")
     parser.add_argument("--metadata-dir", type=str, default="data/metadata", help="Metadata output dir")
-    parser.add_argument("--comp-id", type=int, default=43, help="Competition ID")
-    parser.add_argument("--season-id", type=int, default=106, help="Season ID")
+    parser.add_argument("--comp-id", type=int, default=43, help="Competition ID (43: FIFA World Cup)")
+    parser.add_argument("--season-id", type=int, default=106, help="Season ID (106: 2022)")
     args = parser.parse_args()
 
     raw_dir = Path(args.raw_dir)
@@ -107,13 +173,15 @@ def main() -> None:
     meta_dir.mkdir(parents=True, exist_ok=True)
 
     corpus_dir = proc_dir / "corpus"
+    splits_dir = proc_dir / "splits"
     (corpus_dir / "narratives").mkdir(parents=True, exist_ok=True)
     (corpus_dir / "players").mkdir(parents=True, exist_ok=True)
     (corpus_dir / "tactical_qa").mkdir(parents=True, exist_ok=True)
+    splits_dir.mkdir(parents=True, exist_ok=True)
 
+    enc = tiktoken.get_encoding("gpt2")
     extractor = StatsBombExtractor(raw_dir)
 
-    # Discover available event files
     events_dir = raw_dir / "statsbomb" / "events"
     if not events_dir.exists():
         logger.error(f"No events directory found at {events_dir}")
@@ -156,7 +224,6 @@ def main() -> None:
 
             match_data_map[m_id] = match_data
 
-            # Prepare intermediate serializable objects
             match_dict = {
                 "match_id": m_id,
                 "fixture": match_data.fixture,
@@ -175,7 +242,6 @@ def main() -> None:
                 p_dict["fixture"] = match_data.fixture
                 extracted_players_list.append(p_dict)
 
-            logger.info(f"Processed match {m_id}: {match_data.fixture} ({len(events)} events, {len(match_data.player_metrics)} players)")
         except Exception as e:
             logger.error(f"Error processing match {m_id}: {e}")
 
@@ -188,16 +254,18 @@ def main() -> None:
 
     logger.info(f"Saved {len(extracted_matches_list)} match records and {len(extracted_players_list)} player records to {inter_dir}")
 
-    # 2. Generate corpus samples
+    # 2. Generate corpus samples with syntactic permutations
     logger.info("Generating multi-tier football intelligence training corpus...")
     corpus_samples = []
     all_sample_texts = []
+    samples_by_match = defaultdict(list)
 
     for m_id, match_data in match_data_map.items():
         # Tier 1: Match narrative
         narrative = CorpusGenerator.generate_match_narrative(match_data)
         corpus_samples.append(narrative)
         all_sample_texts.append(narrative["content"])
+        samples_by_match[m_id].append(narrative)
         with open(corpus_dir / "narratives" / f"{m_id}_narrative.md", "w", encoding="utf-8") as f:
             f.write(narrative["content"])
 
@@ -207,6 +275,7 @@ def main() -> None:
             if dossier:
                 corpus_samples.append(dossier)
                 all_sample_texts.append(dossier["content"])
+                samples_by_match[m_id].append(dossier)
                 with open(corpus_dir / "players" / f"{m_id}_{p_metric.player_id}.md", "w", encoding="utf-8") as f:
                     f.write(dossier["content"])
 
@@ -214,6 +283,7 @@ def main() -> None:
         qa = CorpusGenerator.generate_tactical_qa(match_data)
         corpus_samples.append(qa)
         all_sample_texts.append(qa["content"])
+        samples_by_match[m_id].append(qa)
         with open(corpus_dir / "tactical_qa" / f"{m_id}_qa.md", "w", encoding="utf-8") as f:
             f.write(qa["content"])
 
@@ -229,7 +299,7 @@ def main() -> None:
 
     logger.info(f"Generated {len(corpus_samples)} total corpus samples saved to {corpus_dir}")
 
-    # 3. Fact-checking validation
+    # 3. 100% Fact-checking validation
     logger.info("Executing 100% automated statistical validation against ground truth...")
     fact_checker = FactChecker(match_data_map)
     total_claims_verified = 0
@@ -256,11 +326,65 @@ def main() -> None:
     with open(meta_dir / "validation_report.json", "w", encoding="utf-8") as f:
         json.dump(val_report, f, indent=2)
 
-    logger.info(f"Statistical validation complete: {total_claims_verified} claims verified with {len(fact_checker.violations)} violations.")
+    logger.info(f"Statistical validation: {total_claims_verified} claims verified with {len(fact_checker.violations)} violations.")
 
-    # 4. Text diversity and vocabulary analysis
-    logger.info("Computing text diversity, vocabulary, and n-gram statistics...")
-    diversity_report = analyze_corpus_diversity(all_sample_texts)
+    # 4. Match-Level Train/Validation/Test Splits
+    logger.info("Creating match-level train, validation, and test splits (grouping by match ID)...")
+    train_ids, val_ids, test_ids = split_matches_by_stage(match_data_map)
+
+    def write_split(split_name: str, match_id_list: List[int]) -> Dict[str, Any]:
+        split_samples = []
+        split_texts = []
+        for m_id in match_id_list:
+            for s in samples_by_match.get(m_id, []):
+                split_samples.append(s)
+                split_texts.append(s["content"])
+
+        # Write split jsonl
+        s_jsonl = splits_dir / f"{split_name}.jsonl"
+        with open(s_jsonl, "w", encoding="utf-8") as f:
+            for s in split_samples:
+                f.write(json.dumps(s) + "\n")
+
+        # Write split text
+        s_txt = splits_dir / f"{split_name}.txt"
+        with open(s_txt, "w", encoding="utf-8") as f:
+            f.write("\n\n<|endoftext|>\n\n".join(split_texts))
+
+        words_count = sum(len(re.findall(r"\b[A-Za-z0-9_\-\.%]+\b", t)) for t in split_texts)
+        tokens_count = sum(len(enc.encode(t)) for t in split_texts)
+
+        return {
+            "split": split_name,
+            "match_count": len(match_id_list),
+            "match_ids": match_id_list,
+            "document_count": len(split_samples),
+            "narratives_count": sum(1 for s in split_samples if s["sample_type"] == "match_narrative"),
+            "player_dossiers_count": sum(1 for s in split_samples if s["sample_type"] == "player_dossier"),
+            "tactical_qa_count": sum(1 for s in split_samples if s["sample_type"] == "tactical_qa"),
+            "total_words": words_count,
+            "actual_tokens_gpt2": tokens_count
+        }
+
+    train_meta = write_split("train", train_ids)
+    val_meta = write_split("val", val_ids)
+    test_meta = write_split("test", test_ids)
+
+    splits_manifest = {
+        "total_matches": len(match_data_map),
+        "split_ratios_target": "75% train / 12.5% val / 12.5% test",
+        "train": train_meta,
+        "validation": val_meta,
+        "test": test_meta
+    }
+    with open(splits_dir / "splits_manifest.json", "w", encoding="utf-8") as f:
+        json.dump(splits_manifest, f, indent=2)
+
+    logger.info(f"Splits saved to {splits_dir}: Train ({train_meta['match_count']} matches, {train_meta['actual_tokens_gpt2']:,} tokens), Val ({val_meta['match_count']} matches, {val_meta['actual_tokens_gpt2']:,} tokens), Test ({test_meta['match_count']} matches, {test_meta['actual_tokens_gpt2']:,} tokens)")
+
+    # 5. Text diversity and vocabulary analysis
+    logger.info("Computing text diversity, vocabulary, and n-gram statistics across full corpus...")
+    diversity_report = analyze_corpus_diversity(all_sample_texts, enc)
     diversity_report["sample_counts"] = {
         "total_samples": len(corpus_samples),
         "narratives": sum(1 for s in corpus_samples if s["sample_type"] == "match_narrative"),
@@ -272,31 +396,40 @@ def main() -> None:
         "total_events_processed": total_events_processed,
         "total_player_records": len(extracted_players_list)
     }
+    diversity_report["splits_summary"] = splits_manifest
 
     with open(meta_dir / "corpus_diversity_report.json", "w", encoding="utf-8") as f:
         json.dump(diversity_report, f, indent=2)
 
     # Print summary
-    print("\n" + "=" * 60)
-    print("PHASE 2: CORPUS ENGINEERING SUMMARY REPORT")
-    print("=" * 60)
-    print(f"Total Matches Processed:     {len(match_data_map)}")
-    print(f"Total Events Processed:      {total_events_processed}")
-    print(f"Total Player Records:        {len(extracted_players_list)}")
-    print(f"Total Generated Samples:     {len(corpus_samples)}")
-    print(f"  - Match Narratives:        {diversity_report['sample_counts']['narratives']}")
-    print(f"  - Player Dossiers:         {diversity_report['sample_counts']['player_dossiers']}")
-    print(f"  - Tactical Q&A:            {diversity_report['sample_counts']['tactical_qa']}")
-    print(f"Corpus Total Words:          {diversity_report['total_words']:,}")
-    print(f"Corpus Total Characters:     {diversity_report['total_characters']:,}")
-    print(f"Vocabulary Size:             {diversity_report['vocabulary_size']:,} unique words")
-    print(f"Type-Token Ratio (TTR):      {diversity_report['type_token_ratio_ttr_pct']}%")
-    print(f"Trigram Diversity:           {diversity_report['trigram_diversity_pct']}%")
-    print("-" * 60)
-    print(f"Statistical Claims Verified: {total_claims_verified}")
-    print(f"Statistical Violations:      {len(fact_checker.violations)}")
-    print(f"Validation Status:           {val_report['status']}")
-    print("=" * 60 + "\n")
+    print("\n" + "=" * 65)
+    print("PHASE 3A: CORPUS EXPANSION & DATASET PREPARATION SUMMARY")
+    print("=" * 65)
+    print(f"Total Matches Processed:          {len(match_data_map)} / 64")
+    print(f"Total Events Processed:           {total_events_processed:,}")
+    print(f"Total Player Records Extracted:   {len(extracted_players_list):,}")
+    print(f"Total Generated Corpus Documents: {len(corpus_samples):,}")
+    print(f"  - Match Narratives:             {diversity_report['sample_counts']['narratives']}")
+    print(f"  - Player Dossiers:              {diversity_report['sample_counts']['player_dossiers']}")
+    print(f"  - Tactical Q&A:                 {diversity_report['sample_counts']['tactical_qa']}")
+    print("-" * 65)
+    print(f"Corpus Total Words:               {diversity_report['total_words']:,}")
+    print(f"Corpus Total Characters:          {diversity_report['total_characters']:,}")
+    print(f"Actual Baseline Tokens (GPT-2):   {diversity_report['actual_baseline_tokens_gpt2']:,}")
+    print(f"Tokens/Word Ratio:                {diversity_report['tokens_per_word_ratio']}")
+    print(f"Vocabulary Size:                  {diversity_report['vocabulary_size']:,} unique words")
+    print(f"Type-Token Ratio (TTR):           {diversity_report['type_token_ratio_ttr_pct']}%")
+    print(f"Trigram Diversity:                {diversity_report['trigram_diversity_pct']}%")
+    print("-" * 65)
+    print("DATASET SPLITS BY MATCH (Zero Leakage):")
+    print(f"  - Train:      {train_meta['match_count']} matches | {train_meta['document_count']} docs | {train_meta['actual_tokens_gpt2']:,} tokens ({round(train_meta['actual_tokens_gpt2']/diversity_report['actual_baseline_tokens_gpt2']*100, 1)}%)")
+    print(f"  - Validation: {val_meta['match_count']} matches | {val_meta['document_count']} docs | {val_meta['actual_tokens_gpt2']:,} tokens ({round(val_meta['actual_tokens_gpt2']/diversity_report['actual_baseline_tokens_gpt2']*100, 1)}%)")
+    print(f"  - Test:       {test_meta['match_count']} matches | {test_meta['document_count']} docs | {test_meta['actual_tokens_gpt2']:,} tokens ({round(test_meta['actual_tokens_gpt2']/diversity_report['actual_baseline_tokens_gpt2']*100, 1)}%)")
+    print("-" * 65)
+    print(f"Statistical Claims Verified:      {total_claims_verified:,}")
+    print(f"Statistical Violations:           {len(fact_checker.violations)}")
+    print(f"Fact-Checking Validation Status:  {val_report['status']}")
+    print("=" * 65 + "\n")
 
 
 if __name__ == "__main__":

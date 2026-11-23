@@ -4,6 +4,7 @@ Validates extraction, deterministic metric computation, text synthesis,
 and 100% statistical fact-checking accuracy.
 """
 
+import json
 from pathlib import Path
 import pytest
 from src.extraction.match_extractor import StatsBombExtractor
@@ -136,3 +137,29 @@ def test_corpus_generation_and_validation(raw_data_dir):
     claims_qa, violations_qa = fact_checker.verify_tactical_qa(qa)
     assert claims_qa > 0
     assert len(violations_qa) == 0
+
+
+def test_splits_no_match_leakage():
+    splits_manifest_path = Path("data/processed/splits/splits_manifest.json")
+    assert splits_manifest_path.exists(), "Splits manifest must exist"
+
+    with open(splits_manifest_path, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    train_ids = set(manifest["train"]["match_ids"])
+    val_ids = set(manifest["validation"]["match_ids"])
+    test_ids = set(manifest["test"]["match_ids"])
+
+    # Ensure zero overlap
+    assert len(train_ids & val_ids) == 0, "Train and Val match collision detected!"
+    assert len(train_ids & test_ids) == 0, "Train and Test match collision detected!"
+    assert len(val_ids & test_ids) == 0, "Val and Test match collision detected!"
+
+    # Ensure all 64 matches partitioned
+    total_split_matches = len(train_ids) + len(val_ids) + len(test_ids)
+    assert total_split_matches == 64, f"Expected 64 partitioned matches, found {total_split_matches}"
+
+    # Verify token totals
+    assert manifest["train"]["actual_tokens_gpt2"] > 400000
+    assert manifest["validation"]["actual_tokens_gpt2"] > 50000
+    assert manifest["test"]["actual_tokens_gpt2"] > 50000
