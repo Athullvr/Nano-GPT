@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "touchline-lm"
+version = "0.1.0"
+description = "TouchlineLM - Domain-Specific NanoGPT for Football Intelligence"
+authors = [{name = "TouchlineLM Research Team"}]
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0.0",
+    "requests>=2.28.0",
+    "pytest>=7.0.0"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
