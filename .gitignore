@@ -29,6 +29,11 @@ htmlcov/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
+# Model Checkpoints & Training Artifacts
+checkpoints/*
+!checkpoints/.gitkeep
+*.pt
+
 # IDE files
 .vscode/
 .idea/

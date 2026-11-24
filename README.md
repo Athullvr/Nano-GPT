@@ -29,7 +29,8 @@ The long-term objective is to deepen understanding of Transformer architectures,
 - **Phase 3A: Corpus Expansion & Match-Level Splits** *(Completed)*: Ingested all 64 World Cup 2022 matches (234,637 events, 1,980 documents), added syntactic permutations, and partitioned into leak-free match splits.
 - **Phase 3B.1: Tokenizer Engineering** *(Completed)*: Built custom 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on `train.txt`, with special tokens and benchmarked against GPT-2 baseline.
 - **Phase 3B.2: NanoGPT Model Architecture** *(Completed)*: Built educational decoder-only Transformer from scratch in PyTorch (~4.20M parameters, RoPE, Pre-LayerNorm, PyTorch SDPA causal attention, tied embeddings).
-- **Phase 4: Pre-Training & Learning Dynamics** *(Upcoming)*: Autoregressive training on `train.txt`, validation tracking on `val.txt`.
+- **Phase 4A: Training Pipeline Implementation** *(Completed)*: Dataset batching with binary caching, AdamW parameter grouping, cosine warmup scheduler, atomic checkpointing, and Google Colab GPU training setup.
+- **Phase 4B: Model Pre-Training & Convergence** *(Upcoming)*: GPU execution in Google Colab, loss tracking, and perplexity analysis.
 - **Phase 5: Evaluation & Tactical Inference** *(Upcoming)*: Scouting report generation, domain MCQ benchmarks, and tactical reasoning probing.
 
 ---
@@ -42,6 +43,8 @@ TouchlineLM/
 ├── configs/
 │   ├── model_config.json    # 4.2M parameter Transformer configuration
 │   └── tokenizer/           # Saved BPE tokenizer artifacts (vocab.json, merges.txt, config)
+│
+├── checkpoints/             # Model checkpoints (best_model.pt, final_model.pt)
 │
 ├── data/
 │   ├── raw/                 # Pristine raw datasets (StatsBomb JSON, Football-Data CSV)
@@ -59,7 +62,8 @@ TouchlineLM/
 │   ├── corpus_quality_report.md        # Phase 2 quality and diversity audit
 │   ├── phase_3a_report.md              # Phase 3A dataset expansion and splits report
 │   ├── tokenizer_comparison_report.md  # Tokenizer benchmark and fragmentation report
-│   └── model_architecture_report.md    # Model architecture & parameter accounting report
+│   ├── model_architecture_report.md    # Model architecture & parameter accounting report
+│   └── colab_training_guide.md         # Google Colab GPU training guide and commands
 │
 ├── scripts/
 │   ├── download_data.py     # Deterministic data download with SHA256 verification
@@ -67,7 +71,8 @@ TouchlineLM/
 │   ├── validate_data.py     # Schema integrity and coordinate bounds validator
 │   ├── process_corpus.py    # Full end-to-end extraction, generation, and splitting pipeline
 │   ├── train_tokenizer.py   # Custom BPE tokenizer training script
-│   └── evaluate_tokenizers.py # Comparative tokenizer evaluation benchmark
+│   ├── evaluate_tokenizers.py # Comparative tokenizer evaluation benchmark
+│   └── train.py             # Configurable training entrypoint (CLI & Colab)
 │
 ├── src/
 │   ├── extraction/          # Match metadata, event, and lineup extractors
@@ -75,9 +80,10 @@ TouchlineLM/
 │   ├── corpus/              # Multi-tier text generation engine with permutations
 │   ├── validation/          # 100% automated statistical fact-checking engine
 │   ├── tokenizer/           # Custom Byte-Level BPE & GPT-2 baseline tokenizers
-│   └── model/               # TouchlineNanoGPT (RoPE, SDPA causal attention, Pre-LN, tied LM head)
+│   ├── model/               # TouchlineNanoGPT (RoPE, SDPA causal attention, Pre-LN, tied LM head)
+│   └── training/            # Dataset batching, AdamW optimizer, scheduler, TouchlineTrainer
 │
-├── tests/                   # Pytest automated test suite (18 unit & integration tests)
+├── tests/                   # Pytest automated test suite (38 unit & integration tests)
 ├── pyproject.toml           # Project metadata and test configuration
 ├── requirements.txt         # Pinned virtual environment dependencies
 ├── README.md                # Project documentation
@@ -125,7 +131,17 @@ python scripts/train_tokenizer.py --train-file data/processed/splits/train.txt -
 python scripts/evaluate_tokenizers.py
 ```
 
-### 4.5 Run Test Suite
+### 4.5 Training Pipeline & Google Colab Execution
+```bash
+# Verify training pipeline locally with a 3-step dry run (no full training):
+python scripts/train.py --dry-run --device cpu
+
+# Launch full pre-training on Google Colab (CUDA GPU):
+# See research/colab_training_guide.md for the complete Colab setup instructions.
+python scripts/train.py --device cuda --batch-size 16 --seq-len 512 --max-steps 3000
+```
+
+### 4.6 Run Test Suite
 Execute the automated test suite across all modules:
 ```bash
 pytest -v
