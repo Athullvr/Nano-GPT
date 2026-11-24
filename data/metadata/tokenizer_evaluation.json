@@ -1,0 +1,720 @@
+{
+  "models": {
+    "gpt2_baseline": {
+      "vocab_size": 50260,
+      "framework": "tiktoken",
+      "base_model": "gpt2"
+    },
+    "touchline_bpe": {
+      "vocab_size": 4096,
+      "target_vocab_size": 4096,
+      "n_merges": 3836,
+      "special_tokens": {
+        "<|endoftext|>": 4092,
+        "<|narrative|>": 4093,
+        "<|player_dossier|>": 4094,
+        "<|tactical_qa|>": 4095
+      }
+    }
+  },
+  "roundtrip_verification": {
+    "total_documents_tested": 1980,
+    "all_roundtrips_passed": true,
+    "pass_rate_pct": 100.0
+  },
+  "split_comparisons": {
+    "train": {
+      "document_count": 1445,
+      "total_words": 332752,
+      "gpt2_total_tokens": 539066,
+      "custom_bpe_total_tokens": 506789,
+      "token_reduction_pct": 5.99,
+      "tokens_per_word_gpt2": 1.62,
+      "tokens_per_word_custom_bpe": 1.523,
+      "avg_tokens_per_doc_gpt2": 373.1,
+      "avg_tokens_per_doc_custom_bpe": 350.7,
+      "by_document_type": {
+        "match_narrative": {
+          "document_count": 47,
+          "gpt2_tokens_avg": 702.3,
+          "custom_tokens_avg": 707.9,
+          "reduction_pct": -0.79
+        },
+        "player_dossier": {
+          "document_count": 1351,
+          "gpt2_tokens_avg": 366.7,
+          "custom_tokens_avg": 342.2,
+          "reduction_pct": 6.69
+        },
+        "tactical_qa": {
+          "document_count": 47,
+          "gpt2_tokens_avg": 226.6,
+          "custom_tokens_avg": 239.4,
+          "reduction_pct": -5.63
+        }
+      }
+    },
+    "val": {
+      "document_count": 247,
+      "total_words": 57128,
+      "gpt2_total_tokens": 93328,
+      "custom_bpe_total_tokens": 88159,
+      "token_reduction_pct": 5.54,
+      "tokens_per_word_gpt2": 1.634,
+      "tokens_per_word_custom_bpe": 1.543,
+      "avg_tokens_per_doc_gpt2": 377.8,
+      "avg_tokens_per_doc_custom_bpe": 356.9,
+      "by_document_type": {
+        "match_narrative": {
+          "document_count": 8,
+          "gpt2_tokens_avg": 744.8,
+          "custom_tokens_avg": 747.0,
+          "reduction_pct": -0.3
+        },
+        "player_dossier": {
+          "document_count": 231,
+          "gpt2_tokens_avg": 370.4,
+          "custom_tokens_avg": 347.5,
+          "reduction_pct": 6.18
+        },
+        "tactical_qa": {
+          "document_count": 8,
+          "gpt2_tokens_avg": 227.1,
+          "custom_tokens_avg": 240.1,
+          "reduction_pct": -5.72
+        }
+      }
+    },
+    "test": {
+      "document_count": 288,
+      "total_words": 66252,
+      "gpt2_total_tokens": 105958,
+      "custom_bpe_total_tokens": 101549,
+      "token_reduction_pct": 4.16,
+      "tokens_per_word_gpt2": 1.599,
+      "tokens_per_word_custom_bpe": 1.533,
+      "avg_tokens_per_doc_gpt2": 367.9,
+      "avg_tokens_per_doc_custom_bpe": 352.6,
+      "by_document_type": {
+        "match_narrative": {
+          "document_count": 9,
+          "gpt2_tokens_avg": 727.8,
+          "custom_tokens_avg": 734.7,
+          "reduction_pct": -0.95
+        },
+        "player_dossier": {
+          "document_count": 270,
+          "gpt2_tokens_avg": 360.7,
+          "custom_tokens_avg": 343.7,
+          "reduction_pct": 4.71
+        },
+        "tactical_qa": {
+          "document_count": 9,
+          "gpt2_tokens_avg": 225.7,
+          "custom_tokens_avg": 238.7,
+          "reduction_pct": -5.76
+        }
+      }
+    }
+  },
+  "fragmentation_benchmarks": {
+    "player_names": [
+      {
+        "term": "Lionel Andr\u00e9s Messi Cuccittini",
+        "gpt2_tokens_count": 11,
+        "gpt2_tokens": [
+          "L",
+          "ion",
+          "el",
+          " And",
+          "r",
+          "\u00e9s",
+          " Messi",
+          " Cu",
+          "cc",
+          "itt",
+          "ini"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "L",
+          "ionel",
+          " Andr\u00e9s",
+          " Messi",
+          " Cuccittini"
+        ],
+        "token_reduction_pct": 54.5
+      },
+      {
+        "term": "Kylian Mbapp\u00e9 Lottin",
+        "gpt2_tokens_count": 9,
+        "gpt2_tokens": [
+          "K",
+          "yl",
+          "ian",
+          " Mb",
+          "app",
+          "\u00e9",
+          " L",
+          "ott",
+          "in"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "K",
+          "y",
+          "lian",
+          " Mbapp\u00e9",
+          " Lottin"
+        ],
+        "token_reduction_pct": 44.4
+      },
+      {
+        "term": "Aur\u00e9lien Djani Tchouam\u00e9ni",
+        "gpt2_tokens_count": 13,
+        "gpt2_tokens": [
+          "A",
+          "ur",
+          "\u00e9",
+          "l",
+          "ien",
+          " Dj",
+          "ani",
+          " T",
+          "ch",
+          "ou",
+          "am",
+          "\u00e9",
+          "ni"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "A",
+          "ur\u00e9lien",
+          " Djani",
+          " Tchouam\u00e9ni"
+        ],
+        "token_reduction_pct": 69.2
+      },
+      {
+        "term": "Salem Mohammed Al Dawsari",
+        "gpt2_tokens_count": 7,
+        "gpt2_tokens": [
+          "Sal",
+          "em",
+          " Mohammed",
+          " Al",
+          " D",
+          "aws",
+          "ari"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "S",
+          "alem",
+          " Mohammed",
+          " Al",
+          " Dawsari"
+        ],
+        "token_reduction_pct": 28.6
+      },
+      {
+        "term": "Rodrigo Javier De Paul",
+        "gpt2_tokens_count": 6,
+        "gpt2_tokens": [
+          "Rod",
+          "rig",
+          "o",
+          " Javier",
+          " De",
+          " Paul"
+        ],
+        "custom_bpe_tokens_count": 7,
+        "custom_bpe_tokens": [
+          "R",
+          "od",
+          "ri",
+          "go",
+          " Javier",
+          " De",
+          " Paul"
+        ],
+        "token_reduction_pct": -16.7
+      },
+      {
+        "term": "Enzo Jerem\u00edas Fern\u00e1ndez",
+        "gpt2_tokens_count": 10,
+        "gpt2_tokens": [
+          "En",
+          "zo",
+          " Jere",
+          "m",
+          "\u00ed",
+          "as",
+          " Fern",
+          "\u00e1",
+          "nd",
+          "ez"
+        ],
+        "custom_bpe_tokens_count": 9,
+        "custom_bpe_tokens": [
+          "E",
+          "n",
+          "zo",
+          " Je",
+          "rem",
+          "\u00edas",
+          " Fern",
+          "\u00e1",
+          "ndez"
+        ],
+        "token_reduction_pct": 10.0
+      },
+      {
+        "term": "Bruno Miguel Borges Fernandes",
+        "gpt2_tokens_count": 8,
+        "gpt2_tokens": [
+          "B",
+          "run",
+          "o",
+          " Miguel",
+          " Borg",
+          "es",
+          " Fernand",
+          "es"
+        ],
+        "custom_bpe_tokens_count": 7,
+        "custom_bpe_tokens": [
+          "B",
+          "ru",
+          "n",
+          "o",
+          " Miguel",
+          " Borges",
+          " Fernandes"
+        ],
+        "token_reduction_pct": 12.5
+      },
+      {
+        "term": "Luka Modri\u0107",
+        "gpt2_tokens_count": 5,
+        "gpt2_tokens": [
+          "L",
+          "uka",
+          " Mod",
+          "ri",
+          "\u0107"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "L",
+          "u",
+          "ka",
+          " Modri\u0107"
+        ],
+        "token_reduction_pct": 20.0
+      },
+      {
+        "term": "Achraf Hakimi Mouh",
+        "gpt2_tokens_count": 7,
+        "gpt2_tokens": [
+          "A",
+          "ch",
+          "raf",
+          " Hak",
+          "imi",
+          " Mou",
+          "h"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "A",
+          "chraf",
+          " Hakimi",
+          " Mouh"
+        ],
+        "token_reduction_pct": 42.9
+      },
+      {
+        "term": "Bukayo Saka",
+        "gpt2_tokens_count": 6,
+        "gpt2_tokens": [
+          "B",
+          "uk",
+          "ay",
+          "o",
+          " S",
+          "aka"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "B",
+          "u",
+          "kayo",
+          " Saka"
+        ],
+        "token_reduction_pct": 33.3
+      }
+    ],
+    "football_terminology": [
+      {
+        "term": "expected goals (xG)",
+        "gpt2_tokens_count": 6,
+        "gpt2_tokens": [
+          "expected",
+          " goals",
+          " (",
+          "x",
+          "G",
+          ")"
+        ],
+        "custom_bpe_tokens_count": 8,
+        "custom_bpe_tokens": [
+          "ex",
+          "p",
+          "ec",
+          "ted",
+          " goals",
+          " (",
+          "xG",
+          ")"
+        ],
+        "token_reduction_pct": -33.3
+      },
+      {
+        "term": "expected assists (xA)",
+        "gpt2_tokens_count": 6,
+        "gpt2_tokens": [
+          "expected",
+          " assists",
+          " (",
+          "x",
+          "A",
+          ")"
+        ],
+        "custom_bpe_tokens_count": 9,
+        "custom_bpe_tokens": [
+          "ex",
+          "p",
+          "ec",
+          "ted",
+          " assists",
+          " (",
+          "x",
+          "A",
+          ")"
+        ],
+        "token_reduction_pct": -50.0
+      },
+      {
+        "term": "progressive passes",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "pro",
+          "gressive",
+          " passes"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "p",
+          "rogres",
+          "sive",
+          " passes"
+        ],
+        "token_reduction_pct": -33.3
+      },
+      {
+        "term": "progressive carries",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "pro",
+          "gressive",
+          " carries"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "p",
+          "rogres",
+          "sive",
+          " carries"
+        ],
+        "token_reduction_pct": -33.3
+      },
+      {
+        "term": "counterpress",
+        "gpt2_tokens_count": 2,
+        "gpt2_tokens": [
+          "counter",
+          "press"
+        ],
+        "custom_bpe_tokens_count": 6,
+        "custom_bpe_tokens": [
+          "c",
+          "oun",
+          "ter",
+          "p",
+          "res",
+          "s"
+        ],
+        "token_reduction_pct": -200.0
+      },
+      {
+        "term": "half-space",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "half",
+          "-",
+          "space"
+        ],
+        "custom_bpe_tokens_count": 8,
+        "custom_bpe_tokens": [
+          "h",
+          "al",
+          "f",
+          "-",
+          "s",
+          "p",
+          "ac",
+          "e"
+        ],
+        "token_reduction_pct": -166.7
+      },
+      {
+        "term": "interceptions",
+        "gpt2_tokens_count": 2,
+        "gpt2_tokens": [
+          "inter",
+          "ceptions"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "in",
+          "ter",
+          "ce",
+          "p",
+          "tions"
+        ],
+        "token_reduction_pct": -150.0
+      },
+      {
+        "term": "ball recoveries",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "ball",
+          " recover",
+          "ies"
+        ],
+        "custom_bpe_tokens_count": 3,
+        "custom_bpe_tokens": [
+          "b",
+          "all",
+          " recoveries"
+        ],
+        "token_reduction_pct": 0.0
+      },
+      {
+        "term": "pass completion rate",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "pass",
+          " completion",
+          " rate"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "p",
+          "ass",
+          " completion",
+          " rate"
+        ],
+        "token_reduction_pct": -33.3
+      },
+      {
+        "term": "defensive transitions",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "def",
+          "ensive",
+          " transitions"
+        ],
+        "custom_bpe_tokens_count": 3,
+        "custom_bpe_tokens": [
+          "d",
+          "efensive",
+          " transitions"
+        ],
+        "token_reduction_pct": 0.0
+      },
+      {
+        "term": "tactical evaluation",
+        "gpt2_tokens_count": 4,
+        "gpt2_tokens": [
+          "t",
+          "act",
+          "ical",
+          " evaluation"
+        ],
+        "custom_bpe_tokens_count": 7,
+        "custom_bpe_tokens": [
+          "t",
+          "ac",
+          "tical",
+          " e",
+          "v",
+          "alu",
+          "ation"
+        ],
+        "token_reduction_pct": -75.0
+      }
+    ],
+    "numerical_statistics": [
+      {
+        "term": "0.783 xG",
+        "gpt2_tokens_count": 5,
+        "gpt2_tokens": [
+          "0",
+          ".",
+          "783",
+          " x",
+          "G"
+        ],
+        "custom_bpe_tokens_count": 4,
+        "custom_bpe_tokens": [
+          "0",
+          ".",
+          "783",
+          " xG"
+        ],
+        "token_reduction_pct": 20.0
+      },
+      {
+        "term": "0.033 xG",
+        "gpt2_tokens_count": 5,
+        "gpt2_tokens": [
+          "0",
+          ".",
+          "033",
+          " x",
+          "G"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "0",
+          ".",
+          "03",
+          "3",
+          " xG"
+        ],
+        "token_reduction_pct": 0.0
+      },
+      {
+        "term": "81.7% accuracy",
+        "gpt2_tokens_count": 5,
+        "gpt2_tokens": [
+          "81",
+          ".",
+          "7",
+          "%",
+          " accuracy"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "81",
+          ".",
+          "7",
+          "%",
+          " accuracy"
+        ],
+        "token_reduction_pct": 0.0
+      },
+      {
+        "term": "560 of 693 attempted passes",
+        "gpt2_tokens_count": 6,
+        "gpt2_tokens": [
+          "560",
+          " of",
+          " 6",
+          "93",
+          " attempted",
+          " passes"
+        ],
+        "custom_bpe_tokens_count": 8,
+        "custom_bpe_tokens": [
+          "5",
+          "60",
+          " of",
+          " ",
+          "6",
+          "93",
+          " attempted",
+          " passes"
+        ],
+        "token_reduction_pct": -33.3
+      },
+      {
+        "term": "14 shots (8 on target)",
+        "gpt2_tokens_count": 7,
+        "gpt2_tokens": [
+          "14",
+          " shots",
+          " (",
+          "8",
+          " on",
+          " target",
+          ")"
+        ],
+        "custom_bpe_tokens_count": 7,
+        "custom_bpe_tokens": [
+          "14",
+          " shots",
+          " (",
+          "8",
+          " on",
+          " target",
+          ")"
+        ],
+        "token_reduction_pct": 0.0
+      },
+      {
+        "term": "at minute 107",
+        "gpt2_tokens_count": 3,
+        "gpt2_tokens": [
+          "at",
+          " minute",
+          " 107"
+        ],
+        "custom_bpe_tokens_count": 5,
+        "custom_bpe_tokens": [
+          "at",
+          " minute",
+          " ",
+          "10",
+          "7"
+        ],
+        "token_reduction_pct": -66.7
+      },
+      {
+        "term": "won 8 of 26 tackles",
+        "gpt2_tokens_count": 5,
+        "gpt2_tokens": [
+          "won",
+          " 8",
+          " of",
+          " 26",
+          " tackles"
+        ],
+        "custom_bpe_tokens_count": 7,
+        "custom_bpe_tokens": [
+          "won",
+          " ",
+          "8",
+          " of",
+          " ",
+          "26",
+          " tackles"
+        ],
+        "token_reduction_pct": -40.0
+      }
+    ]
+  }
+}

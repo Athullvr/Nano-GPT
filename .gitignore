@@ -19,6 +19,7 @@ data/processed/*
 !data/processed/.gitkeep
 
 # Cache & temporary files
+.tiktoken_cache/
 .pytest_cache/
 .coverage
 htmlcov/
