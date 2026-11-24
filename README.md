@@ -30,7 +30,7 @@ The long-term objective is to deepen understanding of Transformer architectures,
 - **Phase 3B.1: Tokenizer Engineering** *(Completed)*: Built custom 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on `train.txt`, with special tokens and benchmarked against GPT-2 baseline.
 - **Phase 3B.2: NanoGPT Model Architecture** *(Completed)*: Built educational decoder-only Transformer from scratch in PyTorch (~4.20M parameters, RoPE, Pre-LayerNorm, PyTorch SDPA causal attention, tied embeddings).
 - **Phase 4A: Training Pipeline Implementation** *(Completed)*: Dataset batching with binary caching, AdamW parameter grouping, cosine warmup scheduler, atomic checkpointing, and Google Colab GPU training setup.
-- **Phase 4B: Google Colab Training Notebook** *(Completed)*: Created self-contained training notebook (`notebooks/TouchlineLM_Colab_Training.ipynb`) with hardware fail-fast guards, dataset verification, 15-step GPU smoke test, editable hyperparameter center, and Google Drive checkpointing.
+- **Phase 4B & 4B.1: Google Colab Training Notebook & Consistency Audit** *(Completed)*: Created self-contained training notebook (`notebooks/TouchlineLM_Colab_Training.ipynb`) with hardware fail-fast guards, dataset verification, isolated 15-step GPU smoke test, audited gradient accumulation, 48-epoch token budget analysis, and Google Drive checkpointing.
 - **Phase 4C: Model Pre-Training & Convergence** *(Upcoming)*: Full GPU execution on Google Colab, loss tracking, and perplexity analysis.
 - **Phase 5: Evaluation & Tactical Inference** *(Upcoming)*: Scouting report generation, domain MCQ benchmarks, and tactical reasoning probing.
 

@@ -265,6 +265,57 @@ def test_trainer_gradient_accumulation(
     assert not torch.equal(initial_param, model.blocks[0].attn.q_proj.weight)
 
 
+def test_gradient_accumulation_mathematical_equivalence(
+    small_model_config: ModelConfig,
+    synthetic_tokens: np.ndarray,
+):
+    """
+    Assert that gradient accumulation over K micro-batches computes the exact
+    mathematical average of gradients: sum_k(grad_k / K).
+    """
+    accum_steps = 2
+    b, t = 2, 16
+
+    # Fixed seed for reproducibility
+    torch.manual_seed(101)
+    x1 = torch.randint(0, 256, (b, t))
+    y1 = torch.randint(0, 256, (b, t))
+    x2 = torch.randint(0, 256, (b, t))
+    y2 = torch.randint(0, 256, (b, t))
+
+    # Model 1: Accumulate gradients via two forward passes with loss / 2
+    torch.manual_seed(999)
+    model_accum = TouchlineNanoGPT(small_model_config)
+    model_accum.train()
+    model_accum.zero_grad()
+
+    _, loss1 = model_accum(x1, targets=y1)
+    (loss1 / accum_steps).backward()
+
+    _, loss2 = model_accum(x2, targets=y2)
+    (loss2 / accum_steps).backward()
+
+    # Model 2: Compute full batch of size 2*b and forward pass
+    # Since cross_entropy is a mean across all tokens in the batch,
+    # the mean over the concatenated batch equals (mean_1 + mean_2) / 2!
+    torch.manual_seed(999)
+    model_full = TouchlineNanoGPT(small_model_config)
+    model_full.train()
+    model_full.zero_grad()
+
+    x_full = torch.cat([x1, x2], dim=0)
+    y_full = torch.cat([y1, y2], dim=0)
+    _, loss_full = model_full(x_full, targets=y_full)
+    loss_full.backward()
+
+    # Compare accumulated gradients against full batch gradients
+    for (name_a, p_a), (name_b, p_b) in zip(model_accum.named_parameters(), model_full.named_parameters()):
+        if p_a.requires_grad:
+            assert p_a.grad is not None
+            assert p_b.grad is not None
+            assert torch.allclose(p_a.grad, p_b.grad, atol=1e-5), f"Gradient mismatch on {name_a}"
+
+
 def test_trainer_evaluate_and_perplexity(
     small_model_config: ModelConfig,
     synthetic_tokens: np.ndarray,
@@ -509,6 +560,65 @@ def test_cuda_error_handling_when_cuda_unavailable(
             train_data=synthetic_tokens,
             val_data=synthetic_tokens,
         )
+
+
+def test_checkpoint_resume_with_gradient_accumulation(
+    small_model_config: ModelConfig,
+    synthetic_tokens: np.ndarray,
+    tmp_path: Path,
+):
+    """Verify checkpoint save and resume preserves step and dynamics when grad_accum_steps > 1."""
+    ckpt_dir = tmp_path / "grad_accum_ckpts"
+    config = TrainingConfig(
+        learning_rate=6e-4,
+        batch_size=2,
+        seq_len=16,
+        grad_accum_steps=2,
+        max_steps=10,
+        warmup_steps=2,
+        checkpoint_dir=str(ckpt_dir),
+        device="cpu",
+        seed=777,
+    )
+
+    # 1. Run 4 steps with Trainer A
+    torch.manual_seed(777)
+    model_a = TouchlineNanoGPT(small_model_config)
+    trainer_a = TouchlineTrainer(
+        model=model_a,
+        config=config,
+        train_data=synthetic_tokens,
+        val_data=synthetic_tokens,
+    )
+    for _ in range(4):
+        trainer_a.train_step()
+
+    assert trainer_a.step == 4
+    ckpt_file = ckpt_dir / "step_4.pt"
+    trainer_a.save_checkpoint(ckpt_file)
+    loss_a_step_5 = trainer_a.train_step()
+    assert trainer_a.step == 5
+
+    # 2. Advance RNGs to simulate interruption
+    torch.randn(50)
+    np.random.rand(50)
+
+    # 3. Restore Trainer B from checkpoint
+    model_b = TouchlineNanoGPT(small_model_config)
+    trainer_b = TouchlineTrainer(
+        model=model_b,
+        config=config,
+        train_data=synthetic_tokens,
+        val_data=synthetic_tokens,
+    )
+    restored_step = trainer_b.load_checkpoint(ckpt_file)
+    assert restored_step == 4
+    assert trainer_b.step == 4
+
+    # 4. Step 5 on Trainer B should match Trainer A exactly
+    loss_b_step_5 = trainer_b.train_step()
+    assert trainer_b.step == 5
+    assert math.isclose(loss_a_step_5, loss_b_step_5, rel_tol=1e-5)
 
 
 def test_dataset_token_ids_strictly_within_vocabulary():
