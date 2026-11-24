@@ -31,6 +31,7 @@ class GenerationOutput:
     tokens_per_second: float
     stopped_on_eos: bool
     device: str
+    use_cache: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class GenerationOutput:
             "tokens_per_second": round(self.tokens_per_second, 2),
             "stopped_on_eos": self.stopped_on_eos,
             "device": self.device,
+            "use_cache": self.use_cache,
         }
 
 
@@ -135,6 +137,41 @@ class TouchlineInferenceEngine:
 
         return cls(model=model, tokenizer=tokenizer, device=target_device)
 
+    @staticmethod
+    def _sample_next_token(
+        logits_step: torch.Tensor,
+        temperature: float = 0.7,
+        top_k: Optional[int] = 40,
+        top_p: Optional[float] = 0.9,
+    ) -> torch.Tensor:
+        """
+        Samples the next token ID from next-step logits using greedy or temperature + top-k/top-p.
+        """
+        if temperature <= 1e-5:
+            return torch.argmax(logits_step, dim=-1, keepdim=True)
+
+        logits_step = logits_step / max(temperature, 1e-5)
+
+        if top_k is not None and top_k > 0:
+            v, _ = torch.topk(logits_step, min(top_k, logits_step.size(-1)))
+            logits_step[logits_step < v[:, [-1]]] = -float("Inf")
+
+        if top_p is not None and 0.0 < top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits_step, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+            sorted_indices_to_remove = cumulative_probs > top_p
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = False
+
+            indices_to_remove = sorted_indices_to_remove.scatter(
+                1, sorted_indices, sorted_indices_to_remove
+            )
+            logits_step[indices_to_remove] = -float("Inf")
+
+        probs = F.softmax(logits_step, dim=-1)
+        return torch.multinomial(probs, num_samples=1)
+
     @torch.no_grad()
     def generate(
         self,
@@ -146,6 +183,8 @@ class TouchlineInferenceEngine:
         seed: Optional[int] = None,
         stop_at_eos: bool = True,
         stop_token_ids: Optional[Union[int, List[int]]] = None,
+        min_tokens: int = 0,
+        use_cache: bool = True,
     ) -> GenerationOutput:
         """
         Executes autoregressive text generation from an input prompt.
@@ -159,6 +198,9 @@ class TouchlineInferenceEngine:
             seed: Optional random seed for reproducible sampling.
             stop_at_eos: If True, terminates generation upon encountering an EOS/stop token.
             stop_token_ids: Optional additional token ID or list of token IDs to trigger early termination.
+            min_tokens: Minimum number of new tokens to generate before allowing EOS termination.
+            use_cache: If True (default), uses per-layer KV cache for fast O(1) single-token incremental decode.
+                       If False, recomputes entire sequence at each step (legacy / benchmark comparison).
 
         Returns:
             GenerationOutput containing generated text and performance telemetry.
@@ -193,57 +235,60 @@ class TouchlineInferenceEngine:
             torch.cuda.synchronize(self.device)
         start_time = time.perf_counter()
 
-        for _ in range(max_new_tokens):
-            # Crop conditioning window to context length
-            if idx.size(1) > self.model.config.max_seq_len:
-                idx_cond = idx[:, -self.model.config.max_seq_len:]
+        if max_new_tokens > 0:
+            if not use_cache:
+                # Uncached execution path: recompute entire prefix + generated sequence at every step
+                for _ in range(max_new_tokens):
+                    if idx.size(1) > self.model.config.max_seq_len:
+                        idx_cond = idx[:, -self.model.config.max_seq_len:]
+                    else:
+                        idx_cond = idx
+
+                    logits, _ = self.model(idx_cond)
+                    logits_step = logits[:, -1, :].clone()
+                    idx_next = self._sample_next_token(logits_step, temperature, top_k, top_p)
+                    next_token = idx_next.item()
+                    new_tokens_count += 1
+                    idx = torch.cat((idx, idx_next), dim=1)
+
+                    if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
+                        stopped_on_eos = True
+                        break
             else:
-                idx_cond = idx
+                # Per-layer KV cached execution path:
+                # 1. Full-sequence prefill pass
+                if idx.size(1) > self.model.config.max_seq_len:
+                    idx_cond = idx[:, -self.model.config.max_seq_len:]
+                else:
+                    idx_cond = idx
 
-            # Model forward pass
-            logits, _ = self.model(idx_cond)
-            logits_step = logits[:, -1, :].clone()
+                logits, past_key_values = self.model(idx_cond, use_cache=True)
+                logits_step = logits[:, -1, :].clone()
+                idx_next = self._sample_next_token(logits_step, temperature, top_k, top_p)
+                next_token = idx_next.item()
+                new_tokens_count += 1
+                idx = torch.cat((idx, idx_next), dim=1)
 
-            # Greedy decoding path
-            if temperature <= 1e-5:
-                idx_next = torch.argmax(logits_step, dim=-1, keepdim=True)
-            else:
-                # Temperature scaling
-                logits_step = logits_step / temperature
+                if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
+                    stopped_on_eos = True
+                else:
+                    # 2. Single-token incremental decode passes
+                    for _ in range(max_new_tokens - 1):
+                        if idx.size(1) >= self.model.config.max_seq_len:
+                            break
 
-                # Top-k filtering
-                if top_k is not None and top_k > 0:
-                    v, _ = torch.topk(logits_step, min(top_k, logits_step.size(-1)))
-                    logits_step[logits_step < v[:, [-1]]] = -float("Inf")
+                        logits, past_key_values = self.model(
+                            idx_next, past_key_values=past_key_values, use_cache=True
+                        )
+                        logits_step = logits[:, -1, :].clone()
+                        idx_next = self._sample_next_token(logits_step, temperature, top_k, top_p)
+                        next_token = idx_next.item()
+                        new_tokens_count += 1
+                        idx = torch.cat((idx, idx_next), dim=1)
 
-                # Top-p (nucleus) filtering
-                if top_p is not None and 0.0 < top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(logits_step, descending=True)
-                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-
-                    # Mask tokens exceeding cumulative probability
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    # Shift mask right by 1 to include the first token above top_p threshold
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = False
-
-                    # Scatter mask back to original logit indexing
-                    indices_to_remove = sorted_indices_to_remove.scatter(
-                        1, sorted_indices, sorted_indices_to_remove
-                    )
-                    logits_step[indices_to_remove] = -float("Inf")
-
-                probs = F.softmax(logits_step, dim=-1)
-                idx_next = torch.multinomial(probs, num_samples=1)
-
-            next_token = idx_next.item()
-            new_tokens_count += 1
-            idx = torch.cat((idx, idx_next), dim=1)
-
-            # Check for EOS / stop token termination
-            if stop_at_eos and next_token in active_stop_ids:
-                stopped_on_eos = True
-                break
+                        if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
+                            stopped_on_eos = True
+                            break
 
         if self.device.startswith("cuda"):
             torch.cuda.synchronize(self.device)
@@ -268,4 +313,5 @@ class TouchlineInferenceEngine:
             tokens_per_second=tok_per_sec,
             stopped_on_eos=stopped_on_eos,
             device=self.device,
+            use_cache=use_cache,
         )

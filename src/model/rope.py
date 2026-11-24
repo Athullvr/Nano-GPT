@@ -115,23 +115,24 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", sin, persistent=False)
 
     def forward(
-        self, x: torch.Tensor, seq_len: int
+        self, x: torch.Tensor, seq_len: int, offset: int = 0
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Retrieves cos and sin tensors sliced for the given sequence length.
+        Retrieves cos and sin tensors sliced for the given sequence length and position offset.
 
         Args:
             x: Input tensor (used to match device and dtype)
-            seq_len: Number of tokens in sequence (seq_len <= max_seq_len)
+            seq_len: Number of tokens in sequence (seq_len + offset <= max_seq_len)
+            offset: Starting position offset (default: 0 for prefill, m for decode)
 
         Returns:
             cos: Tensor [1, 1, seq_len, dim]
             sin: Tensor [1, 1, seq_len, dim]
         """
-        if seq_len > self.max_seq_len:
+        if offset + seq_len > self.max_seq_len:
             raise ValueError(
-                f"Requested seq_len ({seq_len}) exceeds precomputed max_seq_len ({self.max_seq_len})"
+                f"Requested position range ({offset} to {offset + seq_len}) exceeds precomputed max_seq_len ({self.max_seq_len})"
             )
-        cos = self.cos_cached[:seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0).unsqueeze(0)
-        sin = self.sin_cached[:seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0).unsqueeze(0)
+        cos = self.cos_cached[offset : offset + seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0).unsqueeze(0)
+        sin = self.sin_cached[offset : offset + seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0).unsqueeze(0)
         return cos, sin

@@ -11,7 +11,7 @@ Complete model implementation integrating:
 """
 
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -84,39 +84,61 @@ class TouchlineNanoGPT(nn.Module):
         self,
         idx: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False,
+    ) -> Union[
+        Tuple[torch.Tensor, Optional[torch.Tensor]],
+        Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]],
+        Tuple[torch.Tensor, torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]],
+    ]:
         """
-        Forward pass for next-token prediction.
+        Forward pass for next-token prediction with optional per-layer KV caching.
 
         Args:
             idx: Tensor of token IDs [batch_size, seq_len]
             targets: Optional ground-truth token IDs [batch_size, seq_len] for cross-entropy loss
+            past_key_values: Optional list of (k_past, v_past) per layer
+            use_cache: If True, returns KV cache for future incremental decode steps
 
         Returns:
-            logits: Output logits [batch_size, seq_len, vocab_size]
-            loss: Cross-entropy scalar loss if targets are provided, else None
+            If use_cache is False: (logits, loss)
+            If use_cache is True and targets is None: (logits, presents)
+            If use_cache is True and targets is not None: (logits, loss, presents)
 
         Raises:
-            ValueError: If input sequence length exceeds configured max_seq_len.
+            ValueError: If total sequence length exceeds configured max_seq_len.
         """
         B, T = idx.shape
 
+        # Determine past cached length if past_key_values is provided
+        past_length = 0
+        if past_key_values is not None:
+            past_length = past_key_values[0][0].shape[2]
+
+        total_length = past_length + T
         # Enforce context length boundary
-        if T > self.config.max_seq_len:
+        if total_length > self.config.max_seq_len:
             raise ValueError(
-                f"Sequence length {T} exceeds maximum configured context length {self.config.max_seq_len}"
+                f"Total sequence length {total_length} (past {past_length} + current {T}) "
+                f"exceeds maximum configured context length {self.config.max_seq_len}"
             )
 
         # Token embedding lookup: [B, T] -> [B, T, d_model]
         x = self.token_embedding(idx)
         x = self.dropout(x)
 
-        # Compute RoPE cos, sin tensors for length T: [1, 1, T, head_dim]
-        cos, sin = self.rope(x, seq_len=T)
+        # Compute RoPE cos, sin tensors for length T with position offset: [1, 1, T, head_dim]
+        cos, sin = self.rope(x, seq_len=T, offset=past_length)
 
         # Pass through Transformer blocks
-        for block in self.blocks:
-            x = block(x, cos=cos, sin=sin)
+        presents = [] if use_cache else None
+        for i, block in enumerate(self.blocks):
+            layer_past = past_key_values[i] if past_key_values is not None else None
+            if use_cache:
+                x, present = block(x, cos=cos, sin=sin, layer_past=layer_past, use_cache=True)
+                presents.append(present)
+            else:
+                x = block(x, cos=cos, sin=sin)
 
         # Final LayerNorm
         x = self.ln_f(x)
@@ -134,6 +156,10 @@ class TouchlineNanoGPT(nn.Module):
                 ignore_index=-1,
             )
 
+        if use_cache:
+            if targets is not None:
+                return logits, loss, presents
+            return logits, presents
         return logits, loss
 
     def get_num_params(self, non_embedding: bool = False) -> int:
@@ -164,6 +190,7 @@ class TouchlineNanoGPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 1.0,
         top_k: Optional[int] = None,
+        use_cache: bool = False,
     ) -> torch.Tensor:
         """
         Autoregressive generation for inference and inspection.
@@ -173,23 +200,59 @@ class TouchlineNanoGPT(nn.Module):
             max_new_tokens: Number of tokens to generate
             temperature: Sampling temperature (1.0 = standard, <1.0 = more confident)
             top_k: Optional top-k filtering threshold
+            use_cache: If True, uses per-layer KV cache for single-token incremental decode
 
         Returns:
             idx: Tensor of generated token IDs [batch_size, seq_len + max_new_tokens]
         """
         self.eval()
-        for _ in range(max_new_tokens):
-            # Crop context if it exceeds max_seq_len
-            idx_cond = idx if idx.size(1) <= self.config.max_seq_len else idx[:, -self.config.max_seq_len:]
-            logits, _ = self(idx_cond)
-            # Take logits at the final position
-            logits = logits[:, -1, :] / max(temperature, 1e-5)
+        if max_new_tokens <= 0:
+            return idx
+
+        if not use_cache:
+            for _ in range(max_new_tokens):
+                # Crop context if it exceeds max_seq_len
+                idx_cond = idx if idx.size(1) <= self.config.max_seq_len else idx[:, -self.config.max_seq_len:]
+                logits, _ = self(idx_cond)
+                # Take logits at the final position
+                logits = logits[:, -1, :] / max(temperature, 1e-5)
+
+                if top_k is not None:
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float("Inf")
+
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, idx_next), dim=1)
+
+            return idx
+
+        # KV cached generation path
+        # 1. Prefill step
+        idx_cond = idx if idx.size(1) <= self.config.max_seq_len else idx[:, -self.config.max_seq_len:]
+        logits, past_key_values = self(idx_cond, use_cache=True)
+        logits_step = logits[:, -1, :] / max(temperature, 1e-5)
+
+        if top_k is not None:
+            v, _ = torch.topk(logits_step, min(top_k, logits_step.size(-1)))
+            logits_step[logits_step < v[:, [-1]]] = -float("Inf")
+
+        probs = F.softmax(logits_step, dim=-1)
+        idx_next = torch.multinomial(probs, num_samples=1)
+        idx = torch.cat((idx, idx_next), dim=1)
+
+        # 2. Incremental single-token decode steps
+        for _ in range(max_new_tokens - 1):
+            if idx.size(1) >= self.config.max_seq_len:
+                break
+            logits, past_key_values = self(idx_next, past_key_values=past_key_values, use_cache=True)
+            logits_step = logits[:, -1, :] / max(temperature, 1e-5)
 
             if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float("Inf")
+                v, _ = torch.topk(logits_step, min(top_k, logits_step.size(-1)))
+                logits_step[logits_step < v[:, [-1]]] = -float("Inf")
 
-            probs = F.softmax(logits, dim=-1)
+            probs = F.softmax(logits_step, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
 

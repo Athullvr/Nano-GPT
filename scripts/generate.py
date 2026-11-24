@@ -46,10 +46,17 @@ EVAL_PROMPTS = [
 ]
 
 
-def run_benchmark(engine: TouchlineInferenceEngine, max_new_tokens: int, temperature: float, top_k: int, top_p: float):
+def run_benchmark(
+    engine: TouchlineInferenceEngine,
+    max_new_tokens: int,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    use_cache: bool = True,
+):
     """Executes benchmark across standard evaluation prompts and prints performance metrics."""
     print("\n" + "=" * 75)
-    print(f"TOUCHLINELM BENCHMARK SUITE (Device: {engine.device.upper()})")
+    print(f"TOUCHLINELM BENCHMARK SUITE (Device: {engine.device.upper()} | Cache: {'ENABLED' if use_cache else 'DISABLED (Uncached)'})")
     print("=" * 75)
 
     total_tokens = 0
@@ -65,13 +72,15 @@ def run_benchmark(engine: TouchlineInferenceEngine, max_new_tokens: int, tempera
             top_k=top_k,
             top_p=top_p,
             seed=42 + idx,
+            use_cache=use_cache,
         )
 
         print(output.full_text)
         print("-" * 50)
         print(
             f"Telemetry: {output.new_tokens} tokens in {output.latency_seconds:.3f}s "
-            f"({output.tokens_per_second:.1f} tok/s) | Stopped on EOS: {output.stopped_on_eos}"
+            f"({output.tokens_per_second:.1f} tok/s) | Cache: {'ON' if output.use_cache else 'OFF'} | "
+            f"Stopped on EOS: {output.stopped_on_eos}"
         )
 
         total_tokens += output.new_tokens
@@ -83,13 +92,21 @@ def run_benchmark(engine: TouchlineInferenceEngine, max_new_tokens: int, tempera
     print(f"  • Total Generated Tokens: {total_tokens}")
     print(f"  • Total Inference Time:   {total_time:.3f}s")
     print(f"  • Average Generation Speed: {avg_speed:.2f} tokens/second")
+    print(f"  • Mode:                   {'KV Cached (O(1) decode)' if use_cache else 'Uncached (O(T) recomputation)'}")
     print("=" * 75 + "\n")
 
 
-def interactive_mode(engine: TouchlineInferenceEngine, max_new_tokens: int, temperature: float, top_k: int, top_p: float):
+def interactive_mode(
+    engine: TouchlineInferenceEngine,
+    max_new_tokens: int,
+    temperature: float,
+    top_k: int,
+    top_p: float,
+    use_cache: bool = True,
+):
     """Runs interactive terminal REPL for ad-hoc prompt testing."""
     print("\n" + "=" * 70)
-    print("TouchlineLM Interactive Inference REPL")
+    print(f"TouchlineLM Interactive Inference REPL (Cache: {'ENABLED' if use_cache else 'DISABLED'})")
     print("Type your tactical prompt and press Enter. Enter 'exit' or Ctrl+D to quit.")
     print("=" * 70 + "\n")
 
@@ -108,6 +125,7 @@ def interactive_mode(engine: TouchlineInferenceEngine, max_new_tokens: int, temp
                 temperature=temperature,
                 top_k=top_k,
                 top_p=top_p,
+                use_cache=use_cache,
             )
 
             print("\n--- MODEL GENERATION ---")
@@ -115,7 +133,7 @@ def interactive_mode(engine: TouchlineInferenceEngine, max_new_tokens: int, temp
             print("-" * 70)
             print(
                 f"Generated {output.new_tokens} tokens in {output.latency_seconds:.3f}s "
-                f"({output.tokens_per_second:.1f} tok/s)\n"
+                f"({output.tokens_per_second:.1f} tok/s | Cache: {'ON' if output.use_cache else 'OFF'})\n"
             )
 
         except (KeyboardInterrupt, EOFError):
@@ -196,6 +214,11 @@ def main():
         action="store_true",
         help="Disable automatic termination upon generating EOS (<|endoftext|>)",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable per-layer KV caching and recompute entire sequence at each step (legacy baseline)",
+    )
 
     # Execution controls
     parser.add_argument(
@@ -218,6 +241,8 @@ def main():
 
     args = parser.parse_args()
 
+    use_cache = not args.no_cache
+
     # Load inference engine
     engine = TouchlineInferenceEngine.load_from_checkpoint(
         checkpoint_path=args.checkpoint,
@@ -234,6 +259,7 @@ def main():
             temperature=args.temperature,
             top_k=args.top_k,
             top_p=args.top_p,
+            use_cache=use_cache,
         )
         return
 
@@ -245,6 +271,7 @@ def main():
             temperature=args.temperature,
             top_k=args.top_k,
             top_p=args.top_p,
+            use_cache=use_cache,
         )
         return
 
@@ -274,6 +301,7 @@ def main():
         top_p=args.top_p,
         seed=args.seed,
         stop_at_eos=not args.no_eos_stop,
+        use_cache=use_cache,
     )
 
     print("=" * 70)
@@ -286,6 +314,7 @@ def main():
     print(
         f"Telemetry: {output.new_tokens} tokens generated in {output.latency_seconds:.3f}s "
         f"({output.tokens_per_second:.1f} tokens/s) on {output.device.upper()} | "
+        f"Cache: {'ON (KV Cache)' if output.use_cache else 'OFF (Uncached)'} | "
         f"Stopped on EOS: {output.stopped_on_eos}"
     )
     print("=" * 70)

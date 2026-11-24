@@ -139,9 +139,11 @@ def benchmark_single_generation(
     temperature: float = 0.7,
     top_k: int = 40,
     top_p: float = 0.9,
+    use_cache: bool = True,
 ) -> Dict[str, Any]:
     """
-    Executes a single generation run, measuring prompt prefill and token-by-token decode latencies.
+    Executes a single generation run, measuring prompt prefill and token-by-token decode latencies
+    with optional per-layer KV caching.
     """
     idx = input_ids.clone()
     prompt_len = idx.size(1)
@@ -150,7 +152,12 @@ def benchmark_single_generation(
     sync_device(device)
     t_prefill_start = time.perf_counter()
 
-    logits, _ = model(idx)
+    if use_cache:
+        logits, past_key_values = model(idx, use_cache=True)
+    else:
+        logits, _ = model(idx, use_cache=False)
+        past_key_values = None
+
     logits_step = logits[:, -1, :].clone() / max(temperature, 1e-5)
 
     # Top-k filtering
@@ -169,13 +176,13 @@ def benchmark_single_generation(
         logits_step[indices_to_remove] = -float("Inf")
 
     probs = F.softmax(logits_step, dim=-1)
-    first_token = torch.multinomial(probs, num_samples=1)
+    next_token = torch.multinomial(probs, num_samples=1)
 
     sync_device(device)
     t_prefill_end = time.perf_counter()
     prefill_time = t_prefill_end - t_prefill_start
 
-    idx = torch.cat((idx, first_token), dim=1)
+    idx = torch.cat((idx, next_token), dim=1)
 
     # 2. Measure Token-by-Token Decode Latencies
     decode_step_times = []
@@ -184,13 +191,17 @@ def benchmark_single_generation(
         sync_device(device)
         t_decode_start = time.perf_counter()
 
-        # Existing baseline execution path: recompute entire prefix + generated sequence
-        if idx.size(1) > model.config.max_seq_len:
-            idx_cond = idx[:, -model.config.max_seq_len:]
+        if use_cache:
+            logits, past_key_values = model(
+                next_token, past_key_values=past_key_values, use_cache=True
+            )
         else:
-            idx_cond = idx
+            if idx.size(1) > model.config.max_seq_len:
+                idx_cond = idx[:, -model.config.max_seq_len:]
+            else:
+                idx_cond = idx
+            logits, _ = model(idx_cond, use_cache=False)
 
-        logits, _ = model(idx_cond)
         logits_step = logits[:, -1, :].clone() / max(temperature, 1e-5)
 
         if top_k is not None and top_k > 0:
@@ -220,7 +231,11 @@ def benchmark_single_generation(
     tokens_per_second = max_new_tokens / total_generation_time if total_generation_time > 0 else 0.0
     decode_tok_per_sec = (max_new_tokens - 1) / total_decode_time if total_decode_time > 0 else 0.0
 
+    first_10_decode_ms = statistics.mean(decode_step_times[:10]) * 1000 if len(decode_step_times) >= 10 else 0.0
+    last_10_decode_ms = statistics.mean(decode_step_times[-10:]) * 1000 if len(decode_step_times) >= 10 else 0.0
+
     return {
+        "use_cache": use_cache,
         "prompt_tokens": prompt_len,
         "new_tokens": max_new_tokens,
         "prefill_latency_ms": prefill_time * 1000,
@@ -229,8 +244,88 @@ def benchmark_single_generation(
         "mean_decode_step_ms": statistics.mean(decode_step_times) * 1000,
         "median_decode_step_ms": statistics.median(decode_step_times) * 1000,
         "std_decode_step_ms": statistics.stdev(decode_step_times) * 1000 if len(decode_step_times) > 1 else 0.0,
+        "first_10_decode_ms": first_10_decode_ms,
+        "last_10_decode_ms": last_10_decode_ms,
         "tokens_per_second": tokens_per_second,
         "decode_tokens_per_second": decode_tok_per_sec,
+    }
+
+
+def run_prompt_benchmark(
+    model: TouchlineNanoGPT,
+    input_ids: torch.Tensor,
+    target_tokens: int,
+    device: str,
+    repetitions: int,
+    use_cache: bool,
+) -> Dict[str, Any]:
+    """Runs multiple repetitions for a given prompt and cache configuration."""
+    runs = []
+    peak_vram_mb = 0.0
+
+    for rep in range(repetitions):
+        if device.startswith("cuda"):
+            torch.cuda.reset_peak_memory_stats(device)
+
+        torch.manual_seed(1000 + rep)
+        if device.startswith("cuda"):
+            torch.cuda.manual_seed_all(1000 + rep)
+
+        metrics = benchmark_single_generation(
+            model=model,
+            input_ids=input_ids,
+            max_new_tokens=target_tokens,
+            device=device,
+            use_cache=use_cache,
+        )
+
+        if device.startswith("cuda"):
+            vram_allocated = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+            peak_vram_mb = max(peak_vram_mb, vram_allocated)
+
+        runs.append(metrics)
+
+    prefill_times = [r["prefill_latency_ms"] for r in runs]
+    decode_step_means = [r["mean_decode_step_ms"] for r in runs]
+    first_10_decode_times = [r["first_10_decode_ms"] for r in runs]
+    last_10_decode_times = [r["last_10_decode_ms"] for r in runs]
+    total_latencies = [r["total_generation_latency_ms"] for r in runs]
+    tok_speeds = [r["tokens_per_second"] for r in runs]
+    decode_tok_speeds = [r["decode_tokens_per_second"] for r in runs]
+
+    return {
+        "use_cache": use_cache,
+        "repetitions": repetitions,
+        "peak_vram_mb": round(peak_vram_mb, 2) if device.startswith("cuda") else None,
+        "prefill_ms": {
+            "median": round(statistics.median(prefill_times), 2),
+            "mean": round(statistics.mean(prefill_times), 2),
+            "std": round(statistics.stdev(prefill_times), 2) if len(prefill_times) > 1 else 0.0,
+            "min": round(min(prefill_times), 2),
+            "max": round(max(prefill_times), 2),
+        },
+        "decode_per_token_ms": {
+            "median": round(statistics.median(decode_step_means), 3),
+            "mean": round(statistics.mean(decode_step_means), 3),
+            "std": round(statistics.stdev(decode_step_means), 3) if len(decode_step_means) > 1 else 0.0,
+            "first_10_mean": round(statistics.mean(first_10_decode_times), 3),
+            "last_10_mean": round(statistics.mean(last_10_decode_times), 3),
+        },
+        "total_latency_ms": {
+            "median": round(statistics.median(total_latencies), 2),
+            "mean": round(statistics.mean(total_latencies), 2),
+            "std": round(statistics.stdev(total_latencies), 2) if len(total_latencies) > 1 else 0.0,
+        },
+        "tokens_per_second": {
+            "median": round(statistics.median(tok_speeds), 1),
+            "mean": round(statistics.mean(tok_speeds), 1),
+            "std": round(statistics.stdev(tok_speeds), 1) if len(tok_speeds) > 1 else 0.0,
+        },
+        "decode_tokens_per_second": {
+            "median": round(statistics.median(decode_tok_speeds), 1),
+            "mean": round(statistics.mean(decode_tok_speeds), 1),
+            "std": round(statistics.stdev(decode_tok_speeds), 1) if len(decode_tok_speeds) > 1 else 0.0,
+        },
     }
 
 
@@ -238,14 +333,15 @@ def run_benchmark_suite(
     checkpoint_path: Path,
     tokenizer_dir: Path,
     device: str,
+    mode: str = "both",
     warmup_runs: int = 3,
     repetitions: int = 5,
 ) -> Dict[str, Any]:
     """
-    Executes full benchmark suite across all prompts and repetitions.
+    Executes benchmark suite comparing cached vs uncached inference across all prompts and repetitions.
     """
     print(f"\n{'=' * 75}")
-    print(f"TOUCHLINELM INFERENCE BASELINE BENCHMARK ({device.upper()})")
+    print(f"TOUCHLINELM INFERENCE COMPARATIVE BENCHMARK ({device.upper()} | Mode: {mode.upper()})")
     print(f"{'=' * 75}")
 
     # 1. Model Loading Benchmark
@@ -272,12 +368,20 @@ def run_benchmark_suite(
         dtype=torch.long,
         device=device,
     )
-    for w in range(warmup_runs):
+    for _ in range(warmup_runs):
         _ = benchmark_single_generation(
             model=model,
             input_ids=warmup_ids,
             max_new_tokens=25,
             device=device,
+            use_cache=True,
+        )
+        _ = benchmark_single_generation(
+            model=model,
+            input_ids=warmup_ids,
+            max_new_tokens=25,
+            device=device,
+            use_cache=False,
         )
     print("  • Warm-up complete.")
 
@@ -298,95 +402,87 @@ def run_benchmark_suite(
         print(f"\n--- Testing: {p_name} ---")
         print(f"    Prompt Length: {prompt_len} tokens | Target Generation: {target_tokens} tokens")
 
-        runs = []
-        peak_vram_mb = 0.0
-
-        for rep in range(repetitions):
-            # Reset peak memory stats before each timed run
-            if device.startswith("cuda"):
-                torch.cuda.reset_peak_memory_stats(device)
-
-            # Fix seed per repetition for controlled measurement variance
-            torch.manual_seed(1000 + rep)
-            if device.startswith("cuda"):
-                torch.cuda.manual_seed_all(1000 + rep)
-
-            metrics = benchmark_single_generation(
-                model=model,
-                input_ids=input_ids,
-                max_new_tokens=target_tokens,
-                device=device,
-            )
-
-            if device.startswith("cuda"):
-                vram_allocated = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-                peak_vram_mb = max(peak_vram_mb, vram_allocated)
-
-            runs.append(metrics)
-            print(
-                f"    Rep {rep + 1}/{repetitions}: TTFT = {metrics['prefill_latency_ms']:.2f} ms | "
-                f"Decode Mean = {metrics['mean_decode_step_ms']:.2f} ms/tok | "
-                f"Total = {metrics['total_generation_latency_ms']:.2f} ms | "
-                f"Speed = {metrics['tokens_per_second']:.1f} tok/s"
-            )
-
-        # Aggregate statistics across repetitions
-        prefill_times = [r["prefill_latency_ms"] for r in runs]
-        decode_step_means = [r["mean_decode_step_ms"] for r in runs]
-        total_latencies = [r["total_generation_latency_ms"] for r in runs]
-        tok_speeds = [r["tokens_per_second"] for r in runs]
-        decode_tok_speeds = [r["decode_tokens_per_second"] for r in runs]
-
-        agg = {
+        result_entry = {
             "id": p_id,
             "name": p_name,
             "prompt_tokens": prompt_len,
             "new_tokens": target_tokens,
-            "peak_vram_mb": round(peak_vram_mb, 2) if device.startswith("cuda") else None,
-            "prefill_ms": {
-                "median": round(statistics.median(prefill_times), 2),
-                "mean": round(statistics.mean(prefill_times), 2),
-                "std": round(statistics.stdev(prefill_times), 2) if len(prefill_times) > 1 else 0.0,
-                "min": round(min(prefill_times), 2),
-                "max": round(max(prefill_times), 2),
-            },
-            "decode_per_token_ms": {
-                "median": round(statistics.median(decode_step_means), 3),
-                "mean": round(statistics.mean(decode_step_means), 3),
-                "std": round(statistics.stdev(decode_step_means), 3) if len(decode_step_means) > 1 else 0.0,
-            },
-            "total_latency_ms": {
-                "median": round(statistics.median(total_latencies), 2),
-                "mean": round(statistics.mean(total_latencies), 2),
-                "std": round(statistics.stdev(total_latencies), 2) if len(total_latencies) > 1 else 0.0,
-            },
-            "tokens_per_second": {
-                "median": round(statistics.median(tok_speeds), 1),
-                "mean": round(statistics.mean(tok_speeds), 1),
-                "std": round(statistics.stdev(tok_speeds), 1) if len(tok_speeds) > 1 else 0.0,
-            },
-            "decode_tokens_per_second": {
-                "median": round(statistics.median(decode_tok_speeds), 1),
-                "mean": round(statistics.mean(decode_tok_speeds), 1),
-                "std": round(statistics.stdev(decode_tok_speeds), 1) if len(decode_tok_speeds) > 1 else 0.0,
-            },
         }
-        prompt_results.append(agg)
+
+        # Benchmark Uncached if requested
+        if mode in ("both", "uncached"):
+            print("  [Profiling Uncached Baseline...]")
+            uncached_stats = run_prompt_benchmark(
+                model=model,
+                input_ids=input_ids,
+                target_tokens=target_tokens,
+                device=device,
+                repetitions=repetitions,
+                use_cache=False,
+            )
+            result_entry["uncached"] = uncached_stats
+            print(
+                f"    Uncached: Decode = {uncached_stats['decode_per_token_ms']['median']:.2f} ms/tok "
+                f"(first 10: {uncached_stats['decode_per_token_ms']['first_10_mean']:.2f} ms, "
+                f"last 10: {uncached_stats['decode_per_token_ms']['last_10_mean']:.2f} ms) | "
+                f"Total = {uncached_stats['total_latency_ms']['median']:.1f} ms | "
+                f"Speed = {uncached_stats['tokens_per_second']['median']:.1f} tok/s"
+            )
+
+        # Benchmark Cached if requested
+        if mode in ("both", "cached"):
+            print("  [Profiling KV-Cached Inference...]")
+            cached_stats = run_prompt_benchmark(
+                model=model,
+                input_ids=input_ids,
+                target_tokens=target_tokens,
+                device=device,
+                repetitions=repetitions,
+                use_cache=True,
+            )
+            result_entry["cached"] = cached_stats
+            print(
+                f"    KV-Cached: Decode = {cached_stats['decode_per_token_ms']['median']:.2f} ms/tok "
+                f"(first 10: {cached_stats['decode_per_token_ms']['first_10_mean']:.2f} ms, "
+                f"last 10: {cached_stats['decode_per_token_ms']['last_10_mean']:.2f} ms) | "
+                f"Total = {cached_stats['total_latency_ms']['median']:.1f} ms | "
+                f"Speed = {cached_stats['tokens_per_second']['median']:.1f} tok/s"
+            )
+
+        # Compute speedup if both were measured
+        if "uncached" in result_entry and "cached" in result_entry:
+            uncached_total = result_entry["uncached"]["total_latency_ms"]["median"]
+            cached_total = result_entry["cached"]["total_latency_ms"]["median"]
+            uncached_decode = result_entry["uncached"]["decode_per_token_ms"]["median"]
+            cached_decode = result_entry["cached"]["decode_per_token_ms"]["median"]
+
+            speedup_total = uncached_total / cached_total if cached_total > 0 else 0.0
+            speedup_decode = uncached_decode / cached_decode if cached_decode > 0 else 0.0
+
+            result_entry["speedup"] = {
+                "total_speedup": round(speedup_total, 2),
+                "decode_speedup": round(speedup_decode, 2),
+            }
+            print(f"    >>> SPEEDUP: Total = {speedup_total:.2f}x | Decode = {speedup_decode:.2f}x")
+
+        prompt_results.append(result_entry)
 
     return {
         "device": device,
+        "mode": mode,
         "loading": loading_stats,
         "prompts": prompt_results,
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TouchlineLM Inference Baseline Benchmark")
+    parser = argparse.ArgumentParser(description="TouchlineLM Inference Comparative Benchmark")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/final_model.pt", help="Path to checkpoint")
     parser.add_argument("--tokenizer-dir", type=str, default="configs/tokenizer", help="Tokenizer directory")
     parser.add_argument("--device", type=str, default="both", choices=["cpu", "cuda", "both"], help="Device to benchmark")
+    parser.add_argument("--mode", type=str, default="both", choices=["both", "cached", "uncached"], help="Benchmark mode")
     parser.add_argument("--repetitions", type=int, default=5, help="Number of repetitions per prompt")
-    parser.add_argument("--output-json", type=str, default="data/intermediate/inference_baseline_metrics.json", help="Path to save JSON results")
+    parser.add_argument("--output-json", type=str, default="data/intermediate/inference_kv_cache_comparison.json", help="Path to save JSON results")
     args = parser.parse_args()
 
     ckpt_path = Path(args.checkpoint)
@@ -415,6 +511,7 @@ def main():
             checkpoint_path=ckpt_path,
             tokenizer_dir=tok_dir,
             device=dev,
+            mode=args.mode,
             repetitions=args.repetitions,
         )
 
