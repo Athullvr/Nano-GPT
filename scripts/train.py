@@ -183,7 +183,7 @@ def main() -> None:
         batch_size=args.batch_size,
         seq_len=args.seq_len,
         max_steps=max_steps,
-        warmup_steps=args.warmup_steps if not args.dry_run else 1,
+        warmup_steps=args.warmup_steps if not args.dry_run else 2,
         grad_clip=args.grad_clip,
         eval_interval=eval_interval,
         eval_iters=eval_iters,

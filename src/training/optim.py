@@ -94,29 +94,57 @@ class CosineWarmupScheduler:
         # Store initial learning rate for each param group
         self.base_lrs = [group["lr"] for group in optimizer.param_groups]
 
-    def get_lr(self, step: int, base_lr: float) -> float:
-        """Calculates learning rate for a specific step."""
-        if step < self.warmup_steps:
-            # Linear warmup
-            return base_lr * (step + 1) / max(1, self.warmup_steps)
-        if step > self.max_steps:
-            # Floor
+        # Initialize optimizer learning rates to Step 1 warmup value immediately
+        self._apply_lr(step_num=1)
+
+    def get_lr(self, step_num: int, base_lr: float) -> float:
+        """
+        Calculates learning rate for step_num (1-indexed step count).
+
+        Args:
+            step_num: Current 1-indexed optimization step (1, 2, ..., max_steps).
+            base_lr: Peak learning rate for the parameter group.
+
+        Returns:
+            Computed learning rate float.
+        """
+        if step_num <= self.warmup_steps:
+            # Linear warmup from base_lr / warmup_steps to base_lr
+            return base_lr * step_num / max(1, self.warmup_steps)
+        if step_num >= self.max_steps:
+            # Floor at min_lr
             return self.min_lr
 
         # Cosine decay down to min_lr
-        decay_ratio = (step - self.warmup_steps) / max(1, self.max_steps - self.warmup_steps)
+        decay_ratio = (step_num - self.warmup_steps) / max(1, self.max_steps - self.warmup_steps)
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
         return self.min_lr + coeff * (base_lr - self.min_lr)
 
-    def step(self) -> List[float]:
-        """Advance scheduler by one step and update optimizer learning rates."""
+    def _apply_lr(self, step_num: int) -> List[float]:
+        """Updates optimizer param_groups with learning rates for step_num."""
         lrs = []
         for group, base_lr in zip(self.optimizer.param_groups, self.base_lrs):
-            lr = self.get_lr(self.current_step, base_lr)
+            lr = self.get_lr(step_num, base_lr)
             group["lr"] = lr
             lrs.append(lr)
-        self.current_step += 1
         return lrs
+
+    def get_last_lr(self) -> List[float]:
+        """Returns the current learning rates assigned to optimizer param_groups."""
+        return [group["lr"] for group in self.optimizer.param_groups]
+
+    def step(self) -> List[float]:
+        """
+        Advance scheduler by one step and configure optimizer for the NEXT step.
+
+        Returns:
+            The learning rate list that was active during the step just completed.
+        """
+        last_lrs = self.get_last_lr()
+        self.current_step += 1
+        # Configure optimizer for the upcoming step (current_step + 1)
+        self._apply_lr(step_num=self.current_step + 1)
+        return last_lrs
 
     def state_dict(self) -> Dict[str, Any]:
         """Serialize scheduler state."""
@@ -129,12 +157,11 @@ class CosineWarmupScheduler:
         }
 
     def load_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore scheduler state."""
+        """Restore scheduler state and synchronize optimizer learning rates."""
         self.current_step = state["current_step"]
         self.warmup_steps = state["warmup_steps"]
         self.max_steps = state["max_steps"]
         self.min_lr = state["min_lr"]
         self.base_lrs = state["base_lrs"]
-        # Sync current lr to optimizer
-        for group, base_lr in zip(self.optimizer.param_groups, self.base_lrs):
-            group["lr"] = self.get_lr(self.current_step, base_lr)
+        # Restore optimizer learning rate ready for next step (current_step + 1)
+        self._apply_lr(step_num=self.current_step + 1)

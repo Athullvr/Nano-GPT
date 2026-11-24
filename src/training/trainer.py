@@ -16,6 +16,7 @@ import logging
 import math
 import os
 from pathlib import Path
+import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
@@ -89,8 +90,15 @@ class TouchlineTrainer:
         # Configure compute device
         if config.device == "auto":
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Auto-detected compute device: {self.device}")
         else:
             self.device = config.device
+
+        if self.device.startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError(
+                f"CUDA device requested ('{self.device}'), but torch.cuda.is_available() is False. "
+                "In Google Colab, ensure you have enabled GPU hardware under Runtime -> Change runtime type -> T4 GPU."
+            )
 
         self.model.to(self.device)
 
@@ -115,6 +123,7 @@ class TouchlineTrainer:
         )
 
         self.step = 0
+        self.last_step_lr = config.learning_rate
         self.best_val_loss = float("inf")
         self.checkpoint_dir = Path(config.checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -156,7 +165,8 @@ class TouchlineTrainer:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.grad_clip)
 
         self.optimizer.step()
-        self.scheduler.step()
+        lrs_used = self.scheduler.step()
+        self.last_step_lr = lrs_used[0] if lrs_used else self.optimizer.param_groups[0]["lr"]
 
         self.step += 1
         return loss_val
@@ -240,10 +250,13 @@ class TouchlineTrainer:
             "val_loss": val_loss,
             "val_perplexity": val_perplexity,
             "best_val_loss": self.best_val_loss,
-            "rng_state": torch.get_rng_state(),
+            "python_rng_state": random.getstate(),
+            "numpy_rng_state": np.random.get_state(),
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "amp_scaler_state": None,
         }
         if torch.cuda.is_available() and self.device.startswith("cuda"):
-            checkpoint["cuda_rng_state"] = torch.cuda.get_rng_state_all()
+            checkpoint["torch_cuda_rng_state"] = torch.cuda.get_rng_state_all()
 
         torch.save(checkpoint, tmp_path)
         os.replace(tmp_path, path)
@@ -251,7 +264,7 @@ class TouchlineTrainer:
 
     def load_checkpoint(self, checkpoint_path: Union[str, Path]) -> int:
         """
-        Restores model weights, optimizer state, scheduler state, and step from checkpoint.
+        Restores model weights, optimizer state, scheduler state, step, and RNG states.
 
         Args:
             checkpoint_path: Path to saved checkpoint.
@@ -271,8 +284,20 @@ class TouchlineTrainer:
         self.step = checkpoint.get("step", 0)
         self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
 
-        if "rng_state" in checkpoint:
+        # Restore RNG states for deterministic resumption
+        if "python_rng_state" in checkpoint:
+            random.setstate(checkpoint["python_rng_state"])
+        if "numpy_rng_state" in checkpoint:
+            np.random.set_state(checkpoint["numpy_rng_state"])
+        if "torch_cpu_rng_state" in checkpoint:
+            torch.set_rng_state(checkpoint["torch_cpu_rng_state"].cpu())
+        elif "rng_state" in checkpoint:
             torch.set_rng_state(checkpoint["rng_state"].cpu())
+
+        if "torch_cuda_rng_state" in checkpoint and torch.cuda.is_available() and self.device.startswith("cuda"):
+            torch.cuda.set_rng_state_all(checkpoint["torch_cuda_rng_state"])
+        elif "cuda_rng_state" in checkpoint and torch.cuda.is_available() and self.device.startswith("cuda"):
+            torch.cuda.set_rng_state_all(checkpoint["cuda_rng_state"])
 
         logger.info(f"Successfully loaded checkpoint from {path} at step {self.step}")
         return self.step
@@ -297,7 +322,7 @@ class TouchlineTrainer:
 
             # Logging
             if self.step % self.config.log_interval == 0 or self.step == target_steps:
-                lr = self.optimizer.param_groups[0]["lr"]
+                lr = self.last_step_lr
                 logger.info(f"Step {self.step:5d}/{target_steps} | Train Loss: {loss:.4f} | LR: {lr:.2e}")
 
             # Evaluation
