@@ -99,7 +99,7 @@ def build_notebook():
                 "# Clone TouchlineLM repository if not already present\n",
                 "if not Path(\"src/model\").exists() and not Path(\"TouchlineLM\").exists():\n",
                 "    print(f\"Cloning TouchlineLM repository from GitHub and checking out audited commit {TARGET_COMMIT}...\")\n",
-                "    !git clone https://github.com/Athullvr/Nano-GPT.git TouchlineLM\n",
+                "    !git clone https://github.com/Athullvr/TouchlineLM.git TouchlineLM\n",
                 "    %cd TouchlineLM\n",
                 "    !git checkout {TARGET_COMMIT}\n",
                 "elif Path(\"TouchlineLM\").exists() and not Path(\"src/model\").exists():\n",

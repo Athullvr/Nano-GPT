@@ -21,7 +21,7 @@ You can open and execute the self-contained training notebook via either of the 
 
 ### Method B: Open from GitHub
 1. In Google Colab, select the **GitHub** tab.
-2. Enter repository URL: `https://github.com/Athullvr/Nano-GPT`
+2. Enter repository URL: `https://github.com/Athullvr/TouchlineLM`
 3. Select `notebooks/TouchlineLM_Colab_Training.ipynb`.
 4. Switch runtime to GPU under **Runtime** > **Change runtime type** > **T4 GPU**.
 

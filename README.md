@@ -106,8 +106,8 @@ TouchlineLM/
 ### 4.2 Environment Setup
 ```bash
 # 1. Clone repository
-git clone https://github.com/Athullvr/Nano-GPT.git
-cd Nano-GPT
+git clone https://github.com/Athullvr/TouchlineLM.git
+cd TouchlineLM
 
 # 2. Create and activate virtual environment
 python3 -m venv .venv
