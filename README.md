@@ -28,7 +28,7 @@ The long-term objective is to deepen understanding of Transformer architectures,
 - **Phase 2: Data Extraction & Corpus Engineering** *(Completed)*: Deterministic metrics engine, multi-tier corpus generation (narratives, player dossiers, tactical Q&A), and automated fact-checking.
 - **Phase 3A: Corpus Expansion & Match-Level Splits** *(Completed)*: Ingested all 64 World Cup 2022 matches (234,637 events, 1,980 documents), added syntactic permutations, and partitioned into leak-free match splits.
 - **Phase 3B.1: Tokenizer Engineering** *(Completed)*: Built custom 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on `train.txt`, with special tokens and benchmarked against GPT-2 baseline.
-- **Phase 3B.2: NanoGPT Model Architecture** *(Upcoming)*: Implement decoder-only Transformer (~3.2M parameters, RoPE, Pre-Norm, 1,024 context).
+- **Phase 3B.2: NanoGPT Model Architecture** *(Completed)*: Built educational decoder-only Transformer from scratch in PyTorch (~4.20M parameters, RoPE, Pre-LayerNorm, PyTorch SDPA causal attention, tied embeddings).
 - **Phase 4: Pre-Training & Learning Dynamics** *(Upcoming)*: Autoregressive training on `train.txt`, validation tracking on `val.txt`.
 - **Phase 5: Evaluation & Tactical Inference** *(Upcoming)*: Scouting report generation, domain MCQ benchmarks, and tactical reasoning probing.
 
@@ -40,6 +40,7 @@ The long-term objective is to deepen understanding of Transformer architectures,
 TouchlineLM/
 │
 ├── configs/
+│   ├── model_config.json    # 4.2M parameter Transformer configuration
 │   └── tokenizer/           # Saved BPE tokenizer artifacts (vocab.json, merges.txt, config)
 │
 ├── data/
@@ -57,7 +58,8 @@ TouchlineLM/
 │   ├── text_representation_strategy.md # Multi-tier corpus architecture
 │   ├── corpus_quality_report.md        # Phase 2 quality and diversity audit
 │   ├── phase_3a_report.md              # Phase 3A dataset expansion and splits report
-│   └── tokenizer_comparison_report.md  # Tokenizer benchmark and fragmentation report
+│   ├── tokenizer_comparison_report.md  # Tokenizer benchmark and fragmentation report
+│   └── model_architecture_report.md    # Model architecture & parameter accounting report
 │
 ├── scripts/
 │   ├── download_data.py     # Deterministic data download with SHA256 verification
@@ -72,7 +74,8 @@ TouchlineLM/
 │   ├── metrics/             # Deterministic calculations (progressive actions, xG, xA)
 │   ├── corpus/              # Multi-tier text generation engine with permutations
 │   ├── validation/          # 100% automated statistical fact-checking engine
-│   └── tokenizer/           # Custom Byte-Level BPE & GPT-2 baseline tokenizers
+│   ├── tokenizer/           # Custom Byte-Level BPE & GPT-2 baseline tokenizers
+│   └── model/               # TouchlineNanoGPT (RoPE, SDPA causal attention, Pre-LN, tied LM head)
 │
 ├── tests/                   # Pytest automated test suite (18 unit & integration tests)
 ├── pyproject.toml           # Project metadata and test configuration
