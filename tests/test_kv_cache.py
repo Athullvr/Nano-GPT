@@ -21,6 +21,7 @@ from src.model.config import ModelConfig
 from src.model.model import TouchlineNanoGPT
 from src.tokenizer.bpe_tokenizer import TouchlineBPETokenizer
 from src.inference.engine import TouchlineInferenceEngine, GenerationOutput
+from src.inference.kv_cache import StaticKVCache
 
 
 @pytest.fixture
@@ -289,3 +290,101 @@ def test_cuda_execution(tokenizer: TouchlineBPETokenizer):
     assert out.device == "cuda"
     assert out.new_tokens == 15
     assert out.use_cache is True
+
+
+def test_static_cache_shapes_and_capacity(tiny_model: TouchlineNanoGPT, tiny_config: ModelConfig):
+    """StaticKVCache must preallocate correct tensor buffers and compute exact memory capacity."""
+    static_cache = StaticKVCache.from_model(tiny_model, batch_size=2)
+    assert len(static_cache) == tiny_config.n_layers
+    assert static_cache.get_seq_length() == 0
+
+    for l in range(tiny_config.n_layers):
+        assert static_cache.k_cache[l].shape == (2, tiny_config.n_heads, tiny_config.max_seq_len, tiny_config.head_dim)
+        assert static_cache.v_cache[l].shape == (2, tiny_config.n_heads, tiny_config.max_seq_len, tiny_config.head_dim)
+
+    # 4 layers * 2 * 2 batch * 4 heads * 64 seq * 64 dim * 4 bytes = 1,048,576 bytes = 1.0 MB
+    assert static_cache.memory_bytes() == 1048576
+    assert static_cache.memory_mb() == 1.0
+
+
+def test_static_cache_numerical_equivalence_with_dynamic(tiny_model: TouchlineNanoGPT, tiny_config: ModelConfig):
+    """Static preallocated cache must output bit-for-bit identical logits to dynamic cache across multiple steps."""
+    prompt = torch.randint(0, tiny_config.vocab_size, (1, 10))
+
+    with torch.inference_mode():
+        # Dynamic path
+        dyn_logits_0, dyn_past = tiny_model(prompt, use_cache=True)
+
+        # Static path
+        static_cache = StaticKVCache.from_model(tiny_model, batch_size=1)
+        stat_logits_0, _ = tiny_model(prompt, past_key_values=static_cache, use_cache=True)
+
+    assert torch.allclose(dyn_logits_0, stat_logits_0, atol=1e-5), "Prefill logits mismatch between dynamic and static cache"
+    assert static_cache.get_seq_length() == 10
+
+    # Multi-step decode
+    for step in range(5):
+        next_tok = torch.tensor([[100 + step]])
+        with torch.inference_mode():
+            dyn_logits_step, dyn_past = tiny_model(next_tok, past_key_values=dyn_past, use_cache=True)
+            stat_logits_step, _ = tiny_model(next_tok, past_key_values=static_cache, use_cache=True)
+
+        assert torch.allclose(dyn_logits_step, stat_logits_step, atol=1e-5), f"Step {step} logits mismatch between dynamic and static cache"
+        assert static_cache.get_seq_length() == 10 + step + 1
+
+
+def test_static_cache_greedy_generation_equivalence(inference_engine: TouchlineInferenceEngine):
+    """Greedy generation with static cache must produce 100% identical tokens to dynamic cache."""
+    prompt = "<|narrative|> # Match Report: Argentina vs France\n**Final Scoreline**: Argentina"
+
+    out_dynamic = inference_engine.generate(
+        prompt=prompt,
+        max_new_tokens=30,
+        temperature=0.0,
+        cache_type="dynamic",
+    )
+
+    out_static = inference_engine.generate(
+        prompt=prompt,
+        max_new_tokens=30,
+        temperature=0.0,
+        cache_type="static",
+    )
+
+    assert out_dynamic.generated_text == out_static.generated_text
+    assert out_dynamic.full_text == out_static.full_text
+    assert out_static.cache_type == "static"
+
+
+def test_static_cache_overflow_boundary(tiny_model: TouchlineNanoGPT, tiny_config: ModelConfig):
+    """Static cache must raise ValueError when sequence exceeds preallocated capacity."""
+    static_cache = StaticKVCache.from_model(tiny_model, batch_size=1)
+    full_prompt = torch.randint(0, tiny_config.vocab_size, (1, tiny_config.max_seq_len))
+
+    with torch.inference_mode():
+        tiny_model(full_prompt, past_key_values=static_cache, use_cache=True)
+
+    assert static_cache.get_seq_length() == tiny_config.max_seq_len
+
+    next_tok = torch.tensor([[1]])
+    with pytest.raises(ValueError, match="exceeds maximum configured context length|exceeds preallocated cache capacity"):
+        with torch.inference_mode():
+            tiny_model(next_tok, past_key_values=static_cache, use_cache=True)
+
+
+def test_static_cache_reset(tiny_model: TouchlineNanoGPT):
+    """Static cache reset allows re-running generation without memory reallocation."""
+    static_cache = StaticKVCache.from_model(tiny_model, batch_size=1)
+    p1 = torch.randint(0, 100, (1, 15))
+    with torch.inference_mode():
+        tiny_model(p1, past_key_values=static_cache, use_cache=True)
+    assert static_cache.get_seq_length() == 15
+
+    static_cache.reset()
+    assert static_cache.get_seq_length() == 0
+
+    p2 = torch.randint(0, 100, (1, 20))
+    with torch.inference_mode():
+        tiny_model(p2, past_key_values=static_cache, use_cache=True)
+    assert static_cache.get_seq_length() == 20
+

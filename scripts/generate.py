@@ -219,6 +219,13 @@ def main():
         action="store_true",
         help="Disable per-layer KV caching and recompute entire sequence at each step (legacy baseline)",
     )
+    parser.add_argument(
+        "--cache-type",
+        type=str,
+        default="dynamic",
+        choices=["dynamic", "static"],
+        help="KV cache allocation strategy ('dynamic' for standard torch.cat, 'static' for preallocated in-place cache)",
+    )
 
     # Execution controls
     parser.add_argument(
@@ -302,6 +309,7 @@ def main():
         seed=args.seed,
         stop_at_eos=not args.no_eos_stop,
         use_cache=use_cache,
+        cache_type=args.cache_type,
     )
 
     print("=" * 70)
@@ -314,7 +322,7 @@ def main():
     print(
         f"Telemetry: {output.new_tokens} tokens generated in {output.latency_seconds:.3f}s "
         f"({output.tokens_per_second:.1f} tokens/s) on {output.device.upper()} | "
-        f"Cache: {'ON (KV Cache)' if output.use_cache else 'OFF (Uncached)'} | "
+        f"Cache: {output.cache_type.upper()} ({'ON' if output.use_cache else 'OFF'}) | "
         f"Stopped on EOS: {output.stopped_on_eos}"
     )
     print("=" * 70)

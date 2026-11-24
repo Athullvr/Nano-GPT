@@ -80,11 +80,16 @@ class CausalSelfAttention(nn.Module):
 
         # Step 4: KV Cache concatenation (keys are stored already-rotated)
         if layer_past is not None:
-            k_past, v_past = layer_past
-            k = torch.cat((k_past, k), dim=2)
-            v = torch.cat((v_past, v), dim=2)
-
-        present = (k, v) if use_cache else None
+            if hasattr(layer_past, "update"):
+                k, v = layer_past.update(k, v)
+                present = layer_past
+            else:
+                k_past, v_past = layer_past
+                k = torch.cat((k_past, k), dim=2)
+                v = torch.cat((v_past, v), dim=2)
+                present = (k, v) if use_cache else None
+        else:
+            present = (k, v) if use_cache else None
 
         # Step 5: Scaled Dot-Product Attention
         dropout_p = self.dropout_p if self.training else 0.0

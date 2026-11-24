@@ -131,6 +131,7 @@ def benchmark_model_loading(
     }
 
 
+@torch.inference_mode()
 def benchmark_single_generation(
     model: TouchlineNanoGPT,
     input_ids: torch.Tensor,
@@ -261,10 +262,12 @@ def run_prompt_benchmark(
 ) -> Dict[str, Any]:
     """Runs multiple repetitions for a given prompt and cache configuration."""
     runs = []
-    peak_vram_mb = 0.0
+    peak_alloc_mb = 0.0
+    peak_res_mb = 0.0
 
     for rep in range(repetitions):
         if device.startswith("cuda"):
+            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats(device)
 
         torch.manual_seed(1000 + rep)
@@ -281,7 +284,9 @@ def run_prompt_benchmark(
 
         if device.startswith("cuda"):
             vram_allocated = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
-            peak_vram_mb = max(peak_vram_mb, vram_allocated)
+            vram_reserved = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
+            peak_alloc_mb = max(peak_alloc_mb, vram_allocated)
+            peak_res_mb = max(peak_res_mb, vram_reserved)
 
         runs.append(metrics)
 
@@ -296,7 +301,9 @@ def run_prompt_benchmark(
     return {
         "use_cache": use_cache,
         "repetitions": repetitions,
-        "peak_vram_mb": round(peak_vram_mb, 2) if device.startswith("cuda") else None,
+        "peak_vram_mb": round(peak_alloc_mb, 2) if device.startswith("cuda") else None,
+        "peak_allocated_mb": round(peak_alloc_mb, 2) if device.startswith("cuda") else None,
+        "peak_reserved_mb": round(peak_res_mb, 2) if device.startswith("cuda") else None,
         "prefill_ms": {
             "median": round(statistics.median(prefill_times), 2),
             "mean": round(statistics.mean(prefill_times), 2),

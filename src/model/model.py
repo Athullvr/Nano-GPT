@@ -113,7 +113,10 @@ class TouchlineNanoGPT(nn.Module):
         # Determine past cached length if past_key_values is provided
         past_length = 0
         if past_key_values is not None:
-            past_length = past_key_values[0][0].shape[2]
+            if hasattr(past_key_values, "get_seq_length"):
+                past_length = past_key_values.get_seq_length()
+            else:
+                past_length = past_key_values[0][0].shape[2]
 
         total_length = past_length + T
         # Enforce context length boundary
@@ -136,9 +139,15 @@ class TouchlineNanoGPT(nn.Module):
             layer_past = past_key_values[i] if past_key_values is not None else None
             if use_cache:
                 x, present = block(x, cos=cos, sin=sin, layer_past=layer_past, use_cache=True)
-                presents.append(present)
+                if presents is not None:
+                    presents.append(present)
             else:
                 x = block(x, cos=cos, sin=sin)
+
+        # Advance preallocated static cache sequence counter if applicable
+        if use_cache and hasattr(past_key_values, "advance"):
+            past_key_values.advance(T)
+            presents = past_key_values
 
         # Final LayerNorm
         x = self.ln_f(x)

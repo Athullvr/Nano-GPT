@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from src.model.config import ModelConfig
 from src.model.model import TouchlineNanoGPT
 from src.tokenizer.bpe_tokenizer import TouchlineBPETokenizer
+from src.inference.kv_cache import StaticKVCache
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class GenerationOutput:
     stopped_on_eos: bool
     device: str
     use_cache: bool = True
+    cache_type: str = "dynamic"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -45,6 +47,7 @@ class GenerationOutput:
             "stopped_on_eos": self.stopped_on_eos,
             "device": self.device,
             "use_cache": self.use_cache,
+            "cache_type": self.cache_type,
         }
 
 
@@ -172,7 +175,7 @@ class TouchlineInferenceEngine:
         probs = F.softmax(logits_step, dim=-1)
         return torch.multinomial(probs, num_samples=1)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate(
         self,
         prompt: str,
@@ -185,6 +188,7 @@ class TouchlineInferenceEngine:
         stop_token_ids: Optional[Union[int, List[int]]] = None,
         min_tokens: int = 0,
         use_cache: bool = True,
+        cache_type: str = "dynamic",
     ) -> GenerationOutput:
         """
         Executes autoregressive text generation from an input prompt.
@@ -201,6 +205,7 @@ class TouchlineInferenceEngine:
             min_tokens: Minimum number of new tokens to generate before allowing EOS termination.
             use_cache: If True (default), uses per-layer KV cache for fast O(1) single-token incremental decode.
                        If False, recomputes entire sequence at each step (legacy / benchmark comparison).
+            cache_type: Cache implementation strategy ('dynamic' for standard torch.cat, 'static' for preallocated in-place cache).
 
         Returns:
             GenerationOutput containing generated text and performance telemetry.
@@ -209,6 +214,14 @@ class TouchlineInferenceEngine:
             torch.manual_seed(seed)
             if self.device.startswith("cuda"):
                 torch.cuda.manual_seed_all(seed)
+
+        # Resolve effective cache mode
+        if not use_cache or cache_type == "none":
+            active_cache_mode = "none"
+        elif cache_type == "static":
+            active_cache_mode = "static"
+        else:
+            active_cache_mode = "dynamic"
 
         # Build active set of termination tokens
         active_stop_ids = {self.eos_token_id}
@@ -236,7 +249,7 @@ class TouchlineInferenceEngine:
         start_time = time.perf_counter()
 
         if max_new_tokens > 0:
-            if not use_cache:
+            if active_cache_mode == "none":
                 # Uncached execution path: recompute entire prefix + generated sequence at every step
                 for _ in range(max_new_tokens):
                     if idx.size(1) > self.model.config.max_seq_len:
@@ -254,8 +267,42 @@ class TouchlineInferenceEngine:
                     if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
                         stopped_on_eos = True
                         break
+            elif active_cache_mode == "static":
+                # Preallocated zero-allocation KV cache path
+                static_cache = StaticKVCache.from_model(self.model, batch_size=1, device=self.device)
+                if idx.size(1) > self.model.config.max_seq_len:
+                    idx_cond = idx[:, -self.model.config.max_seq_len:]
+                else:
+                    idx_cond = idx
+
+                logits, _ = self.model(idx_cond, past_key_values=static_cache, use_cache=True)
+                logits_step = logits[:, -1, :].clone()
+                idx_next = self._sample_next_token(logits_step, temperature, top_k, top_p)
+                next_token = idx_next.item()
+                new_tokens_count += 1
+                idx = torch.cat((idx, idx_next), dim=1)
+
+                if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
+                    stopped_on_eos = True
+                else:
+                    for _ in range(max_new_tokens - 1):
+                        if idx.size(1) >= self.model.config.max_seq_len:
+                            break
+
+                        logits, _ = self.model(
+                            idx_next, past_key_values=static_cache, use_cache=True
+                        )
+                        logits_step = logits[:, -1, :].clone()
+                        idx_next = self._sample_next_token(logits_step, temperature, top_k, top_p)
+                        next_token = idx_next.item()
+                        new_tokens_count += 1
+                        idx = torch.cat((idx, idx_next), dim=1)
+
+                        if stop_at_eos and next_token in active_stop_ids and new_tokens_count >= min_tokens:
+                            stopped_on_eos = True
+                            break
             else:
-                # Per-layer KV cached execution path:
+                # Per-layer dynamic KV cached execution path (torch.cat)
                 # 1. Full-sequence prefill pass
                 if idx.size(1) > self.model.config.max_seq_len:
                     idx_cond = idx[:, -self.model.config.max_seq_len:]
@@ -313,5 +360,6 @@ class TouchlineInferenceEngine:
             tokens_per_second=tok_per_sec,
             stopped_on_eos=stopped_on_eos,
             device=self.device,
-            use_cache=use_cache,
+            use_cache=(active_cache_mode != "none"),
+            cache_type=active_cache_mode,
         )
