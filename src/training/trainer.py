@@ -40,6 +40,7 @@ class TrainingConfig:
     betas: Tuple[float, float] = (0.9, 0.95)
     batch_size: int = 16
     seq_len: int = 256
+    grad_accum_steps: int = 1
     max_steps: int = 3000
     warmup_steps: int = 200
     grad_clip: float = 1.0
@@ -138,7 +139,7 @@ class TouchlineTrainer:
 
     def train_step(self) -> float:
         """
-        Executes a single forward/backward optimization step.
+        Executes a single optimization step (with optional gradient accumulation).
 
         Returns:
             Scalar training loss for the current step.
@@ -147,18 +148,25 @@ class TouchlineTrainer:
             FloatingPointError: If loss is NaN or Infinite.
         """
         self.model.train()
-        x, y = get_batch(self.train_data, self.config.batch_size, self.config.seq_len, self.device)
-
         self.optimizer.zero_grad(set_to_none=True)
-        _, loss = self.model(x, targets=y)
+        accum_steps = max(1, self.config.grad_accum_steps)
+        step_loss = 0.0
 
-        loss_val = loss.item()
-        if not math.isfinite(loss_val):
-            raise FloatingPointError(
-                f"Non-finite loss detected at step {self.step}: {loss_val}. Terminating training safely."
-            )
+        for _ in range(accum_steps):
+            x, y = get_batch(self.train_data, self.config.batch_size, self.config.seq_len, self.device)
+            _, loss = self.model(x, targets=y)
 
-        loss.backward()
+            loss_val = loss.item()
+            if not math.isfinite(loss_val):
+                raise FloatingPointError(
+                    f"Non-finite loss detected at step {self.step}: {loss_val}. Terminating training safely."
+                )
+
+            # Scale loss by accumulation factor
+            if accum_steps > 1:
+                loss = loss / accum_steps
+            loss.backward()
+            step_loss += loss_val
 
         # Gradient clipping prevents exploding gradients in deep Transformers
         if self.config.grad_clip > 0.0:
@@ -169,7 +177,7 @@ class TouchlineTrainer:
         self.last_step_lr = lrs_used[0] if lrs_used else self.optimizer.param_groups[0]["lr"]
 
         self.step += 1
-        return loss_val
+        return step_loss / accum_steps
 
     @torch.no_grad()
     def evaluate(self) -> Dict[str, float]:

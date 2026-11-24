@@ -231,6 +231,40 @@ def test_trainer_step_updates_weights(
     assert not torch.equal(initial_param, updated_param), "Weights did not update after train_step!"
 
 
+def test_trainer_gradient_accumulation(
+    small_model_config: ModelConfig,
+    synthetic_tokens: np.ndarray,
+    tmp_path: Path,
+):
+    """Verify that train_step executes cleanly with gradient accumulation steps > 1."""
+    model = TouchlineNanoGPT(small_model_config)
+    config = TrainingConfig(
+        learning_rate=1e-3,
+        batch_size=2,
+        seq_len=16,
+        grad_accum_steps=3,
+        max_steps=5,
+        warmup_steps=1,
+        checkpoint_dir=str(tmp_path / "checkpoints"),
+        device="cpu",
+    )
+
+    trainer = TouchlineTrainer(
+        model=model,
+        config=config,
+        train_data=synthetic_tokens,
+        val_data=synthetic_tokens,
+    )
+
+    initial_param = model.blocks[0].attn.q_proj.weight.clone()
+    loss = trainer.train_step()
+
+    assert isinstance(loss, float)
+    assert loss > 0.0
+    assert trainer.step == 1
+    assert not torch.equal(initial_param, model.blocks[0].attn.q_proj.weight)
+
+
 def test_trainer_evaluate_and_perplexity(
     small_model_config: ModelConfig,
     synthetic_tokens: np.ndarray,

@@ -88,6 +88,7 @@ def parse_args() -> argparse.Namespace:
     # Optimization hyperparameters
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size per training step")
     parser.add_argument("--seq-len", type=int, default=256, help="Context sequence length (<= 1024)")
+    parser.add_argument("--grad-accum-steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--learning-rate", type=float, default=6e-4, help="Peak learning rate")
     parser.add_argument("--min-lr", type=float, default=6e-5, help="Minimum learning rate floor")
     parser.add_argument("--weight-decay", type=float, default=0.1, help="AdamW weight decay for 2D weights")
@@ -182,6 +183,7 @@ def main() -> None:
         weight_decay=args.weight_decay,
         batch_size=args.batch_size,
         seq_len=args.seq_len,
+        grad_accum_steps=args.grad_accum_steps,
         max_steps=max_steps,
         warmup_steps=args.warmup_steps if not args.dry_run else 2,
         grad_clip=args.grad_clip,
