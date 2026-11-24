@@ -22,13 +22,15 @@ The long-term objective is to deepen understanding of Transformer architectures,
 
 ---
 
-## 2. Phase 1 Status: Dataset Research and Acquisition
+## 2. Project Status & Roadmap
 
-Phase 1 establishes the verified data foundation and analytical framework:
-- **Evaluated Data Sources**: Thorough comparison of StatsBomb Open Data, Football-Data.co.uk, Wyscout Open Soccer Dataset, and Understat.
-- **Selected Primary Source**: **StatsBomb Open Data** (CC BY 4.0), providing event streams with continuous spatial coordinates, validated `statsbomb_xg`, and lineups.
-- **Reproducible Pipeline**: Python scripts for deterministic acquisition, data inspection, schema validation, and test coverage.
-- **Zero Hallucination Strategy**: Multi-tier corpus synthesis framework transforming event streams into structured narratives, player summaries, and tactical explanations without fabricating statistics.
+- **Phase 1: Dataset Research and Acquisition** *(Completed)*: Evaluated data sources, selected StatsBomb Open Data (CC BY 4.0), implemented acquisition and schema validation.
+- **Phase 2: Data Extraction & Corpus Engineering** *(Completed)*: Deterministic metrics engine, multi-tier corpus generation (narratives, player dossiers, tactical Q&A), and automated fact-checking.
+- **Phase 3A: Corpus Expansion & Match-Level Splits** *(Completed)*: Ingested all 64 World Cup 2022 matches (234,637 events, 1,980 documents), added syntactic permutations, and partitioned into leak-free match splits.
+- **Phase 3B.1: Tokenizer Engineering** *(Completed)*: Built custom 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on `train.txt`, with special tokens and benchmarked against GPT-2 baseline.
+- **Phase 3B.2: NanoGPT Model Architecture** *(Upcoming)*: Implement decoder-only Transformer (~3.2M parameters, RoPE, Pre-Norm, 1,024 context).
+- **Phase 4: Pre-Training & Learning Dynamics** *(Upcoming)*: Autoregressive training on `train.txt`, validation tracking on `val.txt`.
+- **Phase 5: Evaluation & Tactical Inference** *(Upcoming)*: Scouting report generation, domain MCQ benchmarks, and tactical reasoning probing.
 
 ---
 
@@ -37,34 +39,47 @@ Phase 1 establishes the verified data foundation and analytical framework:
 ```text
 TouchlineLM/
 │
+├── configs/
+│   └── tokenizer/           # Saved BPE tokenizer artifacts (vocab.json, merges.txt, config)
+│
 ├── data/
 │   ├── raw/                 # Pristine raw datasets (StatsBomb JSON, Football-Data CSV)
-│   ├── processed/           # Processed datasets (reproducible through scripts)
-│   ├── intermediate/        # Intermediate artifacts and staged sequences
-│   └── metadata/            # Checksums, download manifests, and inspection summaries
+│   ├── intermediate/        # Extracted matches and player metrics (JSON)
+│   ├── processed/
+│   │   ├── corpus/          # Generated multi-tier markdown & jsonl documents
+│   │   └── splits/          # Match-level partitions (train, val, test .txt & .jsonl)
+│   └── metadata/            # Manifests, diversity reports, and fact-checking audits
 │
 ├── research/
-│   ├── dataset_sources.md   # Comparative analysis of candidate football datasets
+│   ├── dataset_sources.md   # Comparative analysis of football datasets
 │   ├── data_dictionary.md   # Domain schema, pitch geometry, and metric definitions
-│   ├── dataset_analysis.md  # Empirical quality, completeness, and nullness audit
-│   ├── text_representation_strategy.md # Structured data to training corpus framework
-│   └── unresolved_decisions.md         # Open architectural decisions for Phase 2
+│   ├── dataset_analysis.md  # Empirical quality and completeness audit
+│   ├── text_representation_strategy.md # Multi-tier corpus architecture
+│   ├── corpus_quality_report.md        # Phase 2 quality and diversity audit
+│   ├── phase_3a_report.md              # Phase 3A dataset expansion and splits report
+│   └── tokenizer_comparison_report.md  # Tokenizer benchmark and fragmentation report
 │
 ├── scripts/
 │   ├── download_data.py     # Deterministic data download with SHA256 verification
 │   ├── inspect_data.py      # Quantitative inspection and metric distribution analyzer
-│   └── validate_data.py     # Schema integrity, bounds, and referential validator
+│   ├── validate_data.py     # Schema integrity and coordinate bounds validator
+│   ├── process_corpus.py    # Full end-to-end extraction, generation, and splitting pipeline
+│   ├── train_tokenizer.py   # Custom BPE tokenizer training script
+│   └── evaluate_tokenizers.py # Comparative tokenizer evaluation benchmark
 │
-├── configs/                 # Future training and model hyperparameters
-├── notebooks/               # Future exploratory notebooks
-├── src/                     # Core library code for future phases
-├── tests/                   # Pytest test suite for data validation and integrity
+├── src/
+│   ├── extraction/          # Match metadata, event, and lineup extractors
+│   ├── metrics/             # Deterministic calculations (progressive actions, xG, xA)
+│   ├── corpus/              # Multi-tier text generation engine with permutations
+│   ├── validation/          # 100% automated statistical fact-checking engine
+│   └── tokenizer/           # Custom Byte-Level BPE & GPT-2 baseline tokenizers
 │
+├── tests/                   # Pytest automated test suite (18 unit & integration tests)
 ├── pyproject.toml           # Project metadata and test configuration
 ├── requirements.txt         # Pinned virtual environment dependencies
 ├── README.md                # Project documentation
 ├── LICENSE                  # Apache 2.0 License
-└── .gitignore               # Excludes raw data and virtual environment caches
+└── .gitignore               # Strict exclusion of raw data and cache directories
 ```
 
 ---
@@ -89,26 +104,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4.3 Data Acquisition
-Download the initial research sample (StatsBomb World Cup 2022 matches + Premier League macro benchmark):
+### 4.3 Data Pipeline Execution
 ```bash
-python scripts/download_data.py
-```
-This downloads sample JSON/CSV files into `data/raw/` and records provenance metadata in `data/metadata/download_manifest.json`.
+# Download tournament data
+python scripts/download_data.py --source statsbomb --all-matches
 
-### 4.4 Data Inspection & Validation
-Inspect event distributions, metrics, and spatial coordinate coverage:
-```bash
-python scripts/inspect_data.py
+# Process corpus, extract deterministic metrics, and create match splits
+python scripts/process_corpus.py
 ```
 
-Run the validation suite to confirm schema compliance, coordinate bounds, and referential integrity:
+### 4.4 Tokenizer Training & Evaluation
 ```bash
-python scripts/validate_data.py
+# Train custom 4,096-token BPE tokenizer on train split only
+python scripts/train_tokenizer.py --train-file data/processed/splits/train.txt --vocab-size 4096
+
+# Evaluate and compare Custom BPE vs GPT-2 baseline
+python scripts/evaluate_tokenizers.py
 ```
 
 ### 4.5 Run Test Suite
-Execute the automated test suite:
+Execute the automated test suite across all modules:
 ```bash
 pytest -v
 ```
