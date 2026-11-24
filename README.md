@@ -31,8 +31,8 @@ The long-term objective is to deepen understanding of Transformer architectures,
 - **Phase 3B.2: NanoGPT Model Architecture** *(Completed)*: Built educational decoder-only Transformer from scratch in PyTorch (~4.20M parameters, RoPE, Pre-LayerNorm, PyTorch SDPA causal attention, tied embeddings).
 - **Phase 4A: Training Pipeline Implementation** *(Completed)*: Dataset batching with binary caching, AdamW parameter grouping, cosine warmup scheduler, atomic checkpointing, and Google Colab GPU training setup.
 - **Phase 4B & 4B.1: Google Colab Training Notebook & Consistency Audit** *(Completed)*: Created self-contained training notebook (`notebooks/TouchlineLM_Colab_Training.ipynb`) with hardware fail-fast guards, dataset verification, isolated 15-step GPU smoke test, audited gradient accumulation, 48-epoch token budget analysis, and Google Drive checkpointing.
-- **Phase 4C: Model Pre-Training & Convergence** *(Upcoming)*: Full GPU execution on Google Colab, loss tracking, and perplexity analysis.
-- **Phase 5: Evaluation & Tactical Inference** *(Upcoming)*: Scouting report generation, domain MCQ benchmarks, and tactical reasoning probing.
+- **Phase 4C: Model Pre-Training & Convergence** *(Completed)*: 3,000 optimizer steps completed on GPU (final train loss: 0.1027, val loss: 0.5174, test loss: 0.4808). Saved checkpoint at `checkpoints/final_model.pt`.
+- **Phase 5: Local Inference & Validation** *(Completed)*: Built CPU-safe inference engine (`src/inference/`), CLI text generator (`scripts/generate.py`), nucleus sampling, EOS stopping, and benchmarked 278 tok/s (CPU) and 883 tok/s (CUDA). See [`docs/local_inference_guide.md`](docs/local_inference_guide.md).
 
 ---
 
@@ -145,7 +145,22 @@ python scripts/train.py --dry-run --device cpu
 python scripts/train.py --device cuda --batch-size 16 --seq-len 512 --max-steps 3000
 ```
 
-### 4.6 Run Test Suite
+### 4.6 Local Inference & Generation
+```bash
+# Generate with default prompt (CPU or CUDA):
+python scripts/generate.py
+
+# Custom prompt with temperature and top-p sampling:
+python scripts/generate.py --prompt "<|narrative|> # Match Report: Argentina vs France" --max-new-tokens 150 --temperature 0.7
+
+# Run benchmark suite across evaluation prompts:
+python scripts/generate.py --benchmark --device cuda
+
+# Interactive terminal REPL:
+python scripts/generate.py --interactive
+```
+
+### 4.7 Run Test Suite
 Execute the automated test suite across all modules:
 ```bash
 pytest -v
