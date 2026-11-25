@@ -2,9 +2,14 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Phase](https://img.shields.io/badge/Project%20Phase-Phase%201%20Completed-green.svg)]()
+[![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![Tests: 103 Passed](https://img.shields.io/badge/tests-103%20passed-brightgreen.svg)]()
+[![Parameters](https://img.shields.io/badge/Parameters-4.2M-orange.svg)]()
+[![Inference Speed](https://img.shields.io/badge/Throughput-4%2C482%20tok%2Fs-blueviolet.svg)]()
 
-**TouchlineLM** is an experimental, domain-specific small decoder-only Transformer (NanoGPT) engineered to model football intelligence, tactical patterns, and advanced event-level analytics beyond traditional match statistics.
+**TouchlineLM** is an experimental, domain-specific small decoder-only Transformer (NanoGPT) and high-throughput inference serving engine engineered to model football intelligence, tactical patterns, and advanced event-level analytics from scratch.
+
+From raw event graphs and custom Byte-Level BPE tokenization to local pre-training, dynamic/static KV caching, batched inference, and iteration-level continuous batch scheduling.
 
 ---
 
@@ -16,175 +21,199 @@ Traditional sports language applications often regurgitate superficial scoreline
 - **Ball Progression**: Progressive passes, progressive carries, and zone entries.
 - **Shot Creation & Finishing**: Expected Goals (xG), Expected Assists (xA), shot techniques, and freeze-frame spatial contexts.
 - **Tactical Alignments**: Formations (e.g., 4-3-3, 4-2-3-1, 3-5-2), tactical substitutions, and spatial channel dynamics.
-- **Holistic Contributions**: Capturing player value that eludes traditional box scores.
-
-The long-term objective is to deepen understanding of Transformer architectures, domain-adapted tokenization, data synthesis from structured graphs, and inference engineering through a technically rigorous, reproducible experimental pipeline.
+- **Inference Engineering**: Exploring modern serving optimizations (dynamic KV caching, preallocated zero-fragmentation static memory, lockstep batching with left-padding, and continuous batch scheduling).
 
 ---
 
-## 2. Project Status & Roadmap
+## 2. Key Achievements & Milestones
 
-- **Phase 1: Dataset Research and Acquisition** *(Completed)*: Evaluated data sources, selected StatsBomb Open Data (CC BY 4.0), implemented acquisition and schema validation.
-- **Phase 2: Data Extraction & Corpus Engineering** *(Completed)*: Deterministic metrics engine, multi-tier corpus generation (narratives, player dossiers, tactical Q&A), and automated fact-checking.
-- **Phase 3A: Corpus Expansion & Match-Level Splits** *(Completed)*: Ingested all 64 World Cup 2022 matches (234,637 events, 1,980 documents), added syntactic permutations, and partitioned into leak-free match splits.
-- **Phase 3B.1: Tokenizer Engineering** *(Completed)*: Built custom 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on `train.txt`, with special tokens and benchmarked against GPT-2 baseline.
-- **Phase 3B.2: NanoGPT Model Architecture** *(Completed)*: Built educational decoder-only Transformer from scratch in PyTorch (~4.20M parameters, RoPE, Pre-LayerNorm, PyTorch SDPA causal attention, tied embeddings).
-- **Phase 4A: Training Pipeline Implementation** *(Completed)*: Dataset batching with binary caching, AdamW parameter grouping, cosine warmup scheduler, atomic checkpointing, and Google Colab GPU training setup.
-- **Phase 4B & 4B.1: Google Colab Training Notebook & Consistency Audit** *(Completed)*: Created self-contained training notebook (`notebooks/TouchlineLM_Colab_Training.ipynb`) with hardware fail-fast guards, dataset verification, isolated 15-step GPU smoke test, audited gradient accumulation, 48-epoch token budget analysis, and Google Drive checkpointing.
-- **Phase 4C: Model Pre-Training & Convergence** *(Completed)*: 3,000 optimizer steps completed on GPU (final train loss: 0.1027, val loss: 0.5174, test loss: 0.4808). Saved checkpoint at `checkpoints/final_model.pt`.
-- **Phase 5: Local Inference & Validation** *(Completed)*: Built CPU-safe inference engine (`src/inference/`), CLI text generator (`scripts/generate.py`), nucleus sampling, EOS stopping, and benchmarked 278 tok/s (CPU) and 883 tok/s (CUDA). See [`docs/local_inference_guide.md`](docs/local_inference_guide.md).
+### Pre-Training & Model Architecture
+- **Trained From Scratch**: 4.2M parameter custom decoder-only Transformer ($n_{\text{layers}}=4, d_{\text{model}}=256, n_{\text{heads}}=4, d_{\text{head}}=64, \text{context}=1024$).
+- **Modern Transformer Primitives**: Rotary Position Embeddings (RoPE), Pre-LayerNorm residual connections, PyTorch Scaled Dot-Product Attention (SDPA), and tied input/output embedding weights.
+- **Domain BPE Tokenizer**: 4,096-vocabulary Byte-Level BPE tokenizer trained strictly on football analytics corpus with custom special tokens (`<|narrative|>`, `<|player_dossier|>`, `<|tactical_qa|>`, `<|endoftext|>`).
+- **Convergence**: Trained for 3,000 steps on GPU (final train loss: **0.1027**, validation loss: **0.5174**, held-out test loss: **0.4808**).
+
+### Inference & Serving Architecture
+- **Single-Request Local Inference (`src/inference/engine.py`)**: CPU-safe checkpoint deserialization, deterministic greedy decoding, and top-k/top-p nucleus sampling with reproducible seed control.
+- **Dynamic KV Cache**: Autoregressive decode optimization eliminating quadratic prefix recomputation, achieving **~950–1,025 tok/s** on NVIDIA RTX 4050 GPU.
+- **Static Preallocated KV Cache (`src/inference/kv_cache.py`)**: Zero-allocation in-place buffer updates via `narrow().copy_()`, completely eliminating memory fragmentation during generation.
+- **Batched Inference (`generate_batch`)**:
+  - Supports heterogeneous prompt lengths via token `<|endoftext|>` left-padding.
+  - Per-token 2D `position_ids` (`[B, T]`).
+  - Causal + padding attention masks with unmasked diagonals on pad query rows to eliminate SDPA softmax NaNs.
+  - Scales aggregate throughput to **4,482.3 tok/s at $B=8$** (**$4.44\times$ speedup** over sequential execution).
+- **Continuous Batching Scheduler (`src/inference/continuous_scheduler.py`)**:
+  - Iteration-level scheduling eliminating the early-completion execution bubble.
+  - FIFO waiting queue with immediate admission into freed slots.
+  - Dedicated **Slot-Allocated KV Cache (`src/inference/slot_cache.py`)** managing independent sequence lengths and slot isolation.
+  - Immediate eviction on EOS or per-request token limits.
+  - **100% Deterministic Parity**: Greedy tokens produced under continuous batching match single-request sequential inference token-for-token.
+- **Comprehensive Test Suite**: **103 passing tests** across training, tokenization, model forward passes, RoPE, KV caching, batched inference, and continuous batching.
 
 ---
 
-## 3. Directory Architecture
+## 3. Serving Benchmarks & Performance (NVIDIA RTX 4050 Laptop GPU, 6 GB VRAM)
+
+### 3.1 Throughput Scaling across Workload Patterns (Static KV Cache)
+
+| Workload Pattern | $B=1$ TPS | $B=2$ TPS (Speedup) | $B=4$ TPS (Speedup) | $B=8$ TPS (Speedup) | Peak Alloc VRAM |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Homogeneous** | $736.4\text{ tok/s}$ | $1,387.7\text{ tok/s}$ (**1.45x**) | $2,693.2\text{ tok/s}$ (**2.67x**) | **$4,482.3\text{ tok/s}$** (**4.44x**) | $94.3\text{ MB}$ |
+| **Heterogeneous** (Left-Pad) | $737.1\text{ tok/s}$ | $1,259.5\text{ tok/s}$ (**1.29x**) | $2,499.9\text{ tok/s}$ (**2.55x**) | **$4,169.1\text{ tok/s}$** (**4.23x**) | $109.5\text{ MB}$ |
+| **Early Completion** (Bubble) | $695.4\text{ tok/s}$ | $1,104.0\text{ tok/s}$ (**1.17x**) | $1,720.3\text{ tok/s}$ (**1.73x**) | **$2,928.8\text{ tok/s}$** (**2.98x**) | $109.5\text{ MB}$ |
+
+*Detailed timing breakdowns, TTFT, inter-token latencies, and speedup baselines are documented in [`docs/batched_inference_benchmarks.md`](docs/batched_inference_benchmarks.md).*
+
+---
+
+## 4. Repository Structure
 
 ```text
 TouchlineLM/
-│
 ├── configs/
-│   ├── model_config.json    # 4.2M parameter Transformer configuration
-│   └── tokenizer/           # Saved BPE tokenizer artifacts (vocab.json, merges.txt, config)
+│   ├── model_config.json          # 4.2M parameter Transformer configuration
+│   └── tokenizer/                 # Custom BPE tokenizer artifacts (vocab.json, merges.txt)
 │
-├── checkpoints/             # Model checkpoints (best_model.pt, final_model.pt)
+├── checkpoints/                   # Checkpoints (final_model.pt: 3,000 steps)
 │
 ├── data/
-│   ├── raw/                 # Pristine raw datasets (StatsBomb JSON, Football-Data CSV)
-│   ├── intermediate/        # Extracted matches and player metrics (JSON)
-│   ├── processed/
-│   │   ├── corpus/          # Generated multi-tier markdown & jsonl documents
-│   │   └── splits/          # Match-level partitions (train, val, test .txt & .jsonl)
-│   └── metadata/            # Manifests, diversity reports, and fact-checking audits
+│   ├── raw/                       # Raw event data (StatsBomb WC 2022 dataset)
+│   ├── intermediate/              # Extracted matches, metrics, benchmark JSONs
+│   └── processed/splits/          # Leak-free train, validation, and test splits
 │
-├── notebooks/
-│   └── TouchlineLM_Colab_Training.ipynb # Self-contained Google Colab GPU training notebook
-│
-├── research/
-│   ├── dataset_sources.md   # Comparative analysis of football datasets
-│   ├── data_dictionary.md   # Domain schema, pitch geometry, and metric definitions
-│   ├── dataset_analysis.md  # Empirical quality and completeness audit
-│   ├── text_representation_strategy.md # Multi-tier corpus architecture
-│   ├── corpus_quality_report.md        # Phase 2 quality and diversity audit
-│   ├── phase_3a_report.md              # Phase 3A dataset expansion and splits report
-│   ├── tokenizer_comparison_report.md  # Tokenizer benchmark and fragmentation report
-│   ├── model_architecture_report.md    # Model architecture & parameter accounting report
-│   └── colab_training_guide.md         # Google Colab GPU training guide and commands
+├── docs/
+│   ├── local_inference_guide.md          # Local CLI and Python inference guide
+│   ├── inference_baseline.md             # Baseline uncached profiling report
+│   ├── batched_inference_design.md       # Static batching design specification
+│   ├── batched_inference_benchmarks.md   # Audited batched benchmarks & throughput analysis
+│   └── continuous_batching_design.md     # Continuous batch scheduler architecture specification
 │
 ├── scripts/
-│   ├── download_data.py     # Deterministic data download with SHA256 verification
-│   ├── inspect_data.py      # Quantitative inspection and metric distribution analyzer
-│   ├── validate_data.py     # Schema integrity and coordinate bounds validator
-│   ├── process_corpus.py    # Full end-to-end extraction, generation, and splitting pipeline
-│   ├── train_tokenizer.py   # Custom BPE tokenizer training script
-│   ├── evaluate_tokenizers.py # Comparative tokenizer evaluation benchmark
-│   └── train.py             # Configurable training entrypoint (CLI & Colab)
+│   ├── generate.py                       # CLI inference generator with sampling & REPL
+│   ├── benchmark_inference.py            # Baseline timing benchmark
+│   ├── profile_kv_cache_memory.py        # CUDA VRAM memory profiling script
+│   ├── benchmark_batched_inference.py    # Batched throughput benchmark suite
+│   ├── train.py                          # Training pipeline CLI
+│   └── train_tokenizer.py                # BPE tokenizer training script
 │
 ├── src/
-│   ├── extraction/          # Match metadata, event, and lineup extractors
-│   ├── metrics/             # Deterministic calculations (progressive actions, xG, xA)
-│   ├── corpus/              # Multi-tier text generation engine with permutations
-│   ├── validation/          # 100% automated statistical fact-checking engine
-│   ├── tokenizer/           # Custom Byte-Level BPE & GPT-2 baseline tokenizers
-│   ├── model/               # TouchlineNanoGPT (RoPE, SDPA causal attention, Pre-LN, tied LM head)
-│   └── training/            # Dataset batching, AdamW optimizer, scheduler, TouchlineTrainer
+│   ├── model/                     # TouchlineNanoGPT, CausalSelfAttention, RoPE, Blocks
+│   ├── tokenizer/                 # TouchlineBPETokenizer wrapper
+│   ├── inference/
+│   │   ├── engine.py              # TouchlineInferenceEngine (single & static batch generation)
+│   │   ├── kv_cache.py            # DynamicKVCache and StaticKVCache
+│   │   ├── slot_cache.py          # SlotAllocatedKVCache (fixed-slot preallocated memory pool)
+│   │   └── continuous_scheduler.py# ContinuousBatchScheduler (iteration-level scheduling)
+│   ├── metrics/                   # Deterministic football metrics (xG, xA, progressive actions)
+│   └── corpus/                    # Multi-tier text generation engine
 │
-├── tests/                   # Pytest automated test suite (38 unit & integration tests)
-├── pyproject.toml           # Project metadata and test configuration
-├── requirements.txt         # Pinned virtual environment dependencies
-├── README.md                # Project documentation
-├── LICENSE                  # Apache 2.0 License
-└── .gitignore               # Strict exclusion of raw data and cache directories
+└── tests/                         # 103 automated tests (unit, integration, regression)
+    ├── test_model.py              # Architecture, RoPE, attention invariants
+    ├── test_tokenizer.py          # Roundtrip fidelity, special tokens
+    ├── test_inference.py          # Greedy invariance, nucleus sampling, EOS stopping
+    ├── test_kv_cache.py           # Dynamic & Static cache numerical equivalence
+    ├── test_batched_inference.py  # Left-padded batched equivalence & error handling
+    ├── test_slot_cache.py         # Slot isolation, slicing, stale data masking
+    └── test_continuous_batching.py# Iteration scheduling, mid-stream admission, greedy parity
 ```
 
 ---
 
-## 4. Quickstart & Reproducibility Guide
+## 5. Quickstart & Usage
 
-### 4.1 Prerequisites
-- Python 3.10+ (Tested on Python 3.14)
-- Standard Unix/Linux shell environment
-
-### 4.2 Environment Setup
+### 5.1 Environment Setup
 ```bash
-# 1. Clone repository
+# Clone repository
 git clone https://github.com/Athullvr/TouchlineLM.git
 cd TouchlineLM
 
-# 2. Create and activate virtual environment
+# Set up virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-### 4.3 Data Pipeline Execution
+### 5.2 Text Generation (CLI & Python)
+
 ```bash
-# Download tournament data
-python scripts/download_data.py --source statsbomb --all-matches
+# 1. Quick CLI generation with pre-trained checkpoint:
+python scripts/generate.py --prompt "<|narrative|> # Match Report: Argentina vs France" --max-new-tokens 100
 
-# Process corpus, extract deterministic metrics, and create match splits
-python scripts/process_corpus.py
-```
-
-### 4.4 Tokenizer Training & Evaluation
-```bash
-# Train custom 4,096-token BPE tokenizer on train split only
-python scripts/train_tokenizer.py --train-file data/processed/splits/train.txt --vocab-size 4096
-
-# Evaluate and compare Custom BPE vs GPT-2 baseline
-python scripts/evaluate_tokenizers.py
-```
-
-### 4.5 Training Pipeline & Google Colab Execution
-```bash
-# Verify training pipeline locally with a 3-step dry run (no full training):
-python scripts/train.py --dry-run --device cpu
-
-# Launch full pre-training on Google Colab (CUDA GPU):
-# See research/colab_training_guide.md for the complete Colab setup instructions.
-python scripts/train.py --device cuda --batch-size 16 --seq-len 512 --max-steps 3000
-```
-
-### 4.6 Local Inference & Generation
-```bash
-# Generate with default prompt (CPU or CUDA):
-python scripts/generate.py
-
-# Custom prompt with temperature and top-p sampling:
-python scripts/generate.py --prompt "<|narrative|> # Match Report: Argentina vs France" --max-new-tokens 150 --temperature 0.7
-
-# Run benchmark suite across evaluation prompts:
-python scripts/generate.py --benchmark --device cuda
-
-# Interactive terminal REPL:
+# 2. Interactive Terminal REPL:
 python scripts/generate.py --interactive
 ```
 
-### 4.7 Run Test Suite
-Execute the automated test suite across all modules:
+**Python Inference API**:
+```python
+from src.inference.engine import TouchlineInferenceEngine
+
+# Load engine from trained checkpoint
+engine = TouchlineInferenceEngine.load_from_checkpoint(
+    checkpoint_path="checkpoints/final_model.pt",
+    tokenizer_dir="configs/tokenizer",
+    device="auto",
+)
+
+# Single request with Static KV Cache
+output = engine.generate(
+    prompt="<|narrative|> Match summary: In the 85th minute",
+    max_new_tokens=50,
+    temperature=0.7,
+    cache_type="static",
+)
+print(output.generated_text)
+```
+
+### 5.3 Batched Inference
+```python
+from src.inference.engine import BatchRequest
+
+requests = [
+    BatchRequest(prompt="Hello", max_new_tokens=20),
+    BatchRequest(prompt="The match was intense from the opening whistle", max_new_tokens=40),
+]
+
+# Run lockstep batched inference with left-padding:
+batch_output = engine.generate_batch(requests, cache_type="static")
+for item in batch_output.items:
+    print(f"[{item.request_index}] {item.generated_text}")
+```
+
+### 5.4 Continuous Batching Scheduler
+```python
+from src.inference.continuous_scheduler import ContinuousBatchScheduler, ContinuousBatchRequest
+
+scheduler = ContinuousBatchScheduler(
+    model=engine.model,
+    tokenizer=engine.tokenizer,
+    max_active_slots=8,
+)
+
+# Submit asynchronous client requests
+r1 = scheduler.submit_request(ContinuousBatchRequest(prompt="Short query", max_new_tokens=15))
+r2 = scheduler.submit_request(ContinuousBatchRequest(prompt="Detailed tactical breakdown", max_new_tokens=60))
+
+# Execute until complete (or call scheduler.step() in a server event loop)
+results = scheduler.run_all([])
+for res in results:
+    print(f"Req {res.request_id} ({res.tokens_per_second:.1f} tok/s): {res.generated_text}")
+```
+
+### 5.5 Run Test Suite
+Run all 103 tests across model, tokenizer, and serving infrastructure:
 ```bash
 pytest -v
 ```
 
 ---
 
-## 5. Dataset Provenance and Attribution
+## 6. Dataset Provenance and Attribution
 
 - **StatsBomb Open Data**: Event data provided by [StatsBomb](https://statsbomb.com/). Used under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
 - **Football-Data.co.uk**: Historical match records and betting odds sourced from [Football-Data.co.uk](https://www.football-data.co.uk/).
 
 ---
 
-## 6. Project Roadmap
+## 7. License
 
-- **Phase 1: Dataset Research and Acquisition** *(Completed)*
-  - Research open sources, implement acquisition pipeline, audit data quality, establish representation strategy.
-- **Phase 2: Corpus Synthesis & Tokenizer Engineering** *(Upcoming)*
-  - Implement deterministic metric calculators and narrative synthesizers.
-  - Train custom domain Byte-Pair Encoding (BPE) tokenizer.
-- **Phase 3: NanoGPT Architecture Implementation**
-  - Implement decoder-only Transformer with causal self-attention, Rotary/Learned positional embeddings, and MLP feed-forward blocks.
-- **Phase 4: Pre-Training & Learning Dynamics**
-  - Autoregressive pre-training, loss convergence analysis, and domain-perplexity tracking.
-- **Phase 5: Evaluation & Tactical Inference**
-  - Domain-specific MCQ benchmarks, scouting report generation, and tactical reasoning probing.
+Distributed under the Apache 2.0 License. See [`LICENSE`](LICENSE) for details.
