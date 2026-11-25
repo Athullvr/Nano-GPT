@@ -320,10 +320,11 @@ class SlotAllocatedKVCache:
         layer_idx: int,
         k_step: torch.Tensor,
         v_step: torch.Tensor,
+        advance_length: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Writes newly projected single-token key and value tensors for all active slots
-        at their respective physical indices L_i, increments valid lengths L_i <- L_i + 1,
+        at their respective physical indices L_i, optionally increments valid lengths L_i <- L_i + 1,
         and returns the updated batched views and boolean attention mask.
 
         Args:
@@ -331,6 +332,7 @@ class SlotAllocatedKVCache:
             layer_idx: Transformer layer index.
             k_step: [B_act, n_heads, 1, head_dim] newly projected keys.
             v_step: [B_act, n_heads, 1, head_dim] newly projected values.
+            advance_length: If True, increments valid sequence length after writing.
 
         Returns:
             Tuple of (k_batch, v_batch, attn_mask):
@@ -345,18 +347,35 @@ class SlotAllocatedKVCache:
             )
 
         # Write each slot at its current length L_i
+        # If advance_length is False, write to the buffer without advancing sequence counter yet
         for b, slot_id in enumerate(active_slots):
             pos = self._seq_lengths[slot_id]
-            self.write(
-                slot_id=slot_id,
-                layer_idx=layer_idx,
-                position=pos,
-                key=k_step[b : b + 1],
-                value=v_step[b : b + 1],
-            )
+            self._validate_slot_allocated(slot_id)
+            self._validate_layer_idx(layer_idx)
+            if pos >= self.max_seq_len:
+                raise ValueError(f"Write exceeds slot capacity at pos {pos}")
+            self.k_cache[layer_idx][slot_id, :, pos : pos + 1, :].copy_(k_step[b, :, :, :])
+            self.v_cache[layer_idx][slot_id, :, pos : pos + 1, :].copy_(v_step[b, :, :, :])
+            if advance_length:
+                self._seq_lengths[slot_id] += 1
 
         # Return updated views including the newly written token
-        return self.get_batched_active_views(active_slots, layer_idx)
+        lengths = [
+            (self._seq_lengths[s] if advance_length else self._seq_lengths[s] + 1)
+            for s in active_slots
+        ]
+        T_max_active = max(lengths)
+
+        slot_tensor = torch.tensor(active_slots, dtype=torch.long, device=self.device)
+        k_batch = torch.index_select(self.k_cache[layer_idx], 0, slot_tensor)[:, :, :T_max_active, :]
+        v_batch = torch.index_select(self.v_cache[layer_idx], 0, slot_tensor)[:, :, :T_max_active, :]
+
+        attn_mask = torch.zeros((B_act, 1, 1, T_max_active), dtype=torch.bool, device=self.device)
+        for b, seq_len in enumerate(lengths):
+            if seq_len > 0:
+                attn_mask[b, 0, 0, :seq_len] = True
+
+        return k_batch, v_batch, attn_mask
 
     # -------------------------------------------------------------------------
     # Telemetry and Sizing
@@ -384,6 +403,17 @@ class SlotAllocatedKVCache:
         return self.memory_bytes() / (1000 ** 2)
 
     # -------------------------------------------------------------------------
+    # Model-Forward Proxy Interface
+    # -------------------------------------------------------------------------
+
+    def create_batch_proxy(self, active_slots: List[int]) -> "BatchedSlotCacheProxy":
+        """
+        Creates a list-like proxy of layer caches for the given active slots.
+        Passed directly as `past_key_values` into `model.forward()`.
+        """
+        return BatchedSlotCacheProxy(self, active_slots)
+
+    # -------------------------------------------------------------------------
     # Private Validation Helpers
     # -------------------------------------------------------------------------
 
@@ -403,3 +433,70 @@ class SlotAllocatedKVCache:
             raise TypeError(f"layer_idx must be an int, got {type(layer_idx)}")
         if layer_idx < 0 or layer_idx >= self.n_layers:
             raise IndexError(f"layer_idx {layer_idx} out of bounds for {self.n_layers} layers")
+
+
+class BatchedSlotLayerProxy:
+    """Proxy providing layer-specific update interface for CausalSelfAttention."""
+
+    def __init__(
+        self,
+        cache_pool: SlotAllocatedKVCache,
+        layer_idx: int,
+        active_slots: List[int],
+    ) -> None:
+        self.cache_pool = cache_pool
+        self.layer_idx = layer_idx
+        self.active_slots = active_slots
+
+    def update(
+        self, k: torch.Tensor, v: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        k, v: [B_act, n_heads, 1, head_dim] newly projected tokens for active slots.
+        Writes in-place into cache_pool at physical index L_i for each active slot.
+        Does not advance valid lengths yet (advanced by proxy.advance() after all layers finish).
+        Returns active slice (k_batch, v_batch) up to T_max_active (which is max(L_i) + 1).
+        """
+        k_batch, v_batch, _ = self.cache_pool.write_batched_step(
+            active_slots=self.active_slots,
+            layer_idx=self.layer_idx,
+            k_step=k,
+            v_step=v,
+            advance_length=False,
+        )
+        return k_batch, v_batch
+
+
+class BatchedSlotCacheProxy:
+    """
+    List-like proxy wrapping SlotAllocatedKVCache across all layers for a specific active slot set.
+    Passed as `past_key_values` into `TouchlineNanoGPT.forward()`.
+    """
+
+    def __init__(
+        self,
+        cache_pool: SlotAllocatedKVCache,
+        active_slots: List[int],
+    ) -> None:
+        self.cache_pool = cache_pool
+        self.active_slots = active_slots
+        self.n_layers = cache_pool.n_layers
+
+    def get_seq_length(self) -> int:
+        """Returns the maximum cached sequence length across the active slots."""
+        if not self.active_slots:
+            return 0
+        return max(self.cache_pool.get_sequence_length(s) for s in self.active_slots)
+
+    def advance(self, T_new: int) -> None:
+        """Advances sequence lengths for all active slots after all layers complete."""
+        for slot_id in self.active_slots:
+            self.cache_pool._seq_lengths[slot_id] += T_new
+
+    def __getitem__(self, layer_idx: int) -> BatchedSlotLayerProxy:
+        if layer_idx < 0 or layer_idx >= self.n_layers:
+            raise IndexError(f"Layer index {layer_idx} out of bounds for {self.n_layers} layers")
+        return BatchedSlotLayerProxy(self.cache_pool, layer_idx, self.active_slots)
+
+    def __len__(self) -> int:
+        return self.n_layers
