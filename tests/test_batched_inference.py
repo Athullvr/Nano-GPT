@@ -226,3 +226,229 @@ def test_left_padded_batch_numerical_equivalence(
             assert not torch.isnan(b_logits_0).any(), f"NaN detected at decode step {step}"
             assert torch.allclose(b_logits_0[0, -1, :], s_logits_0[0, -1, :], atol=1e-5, rtol=1e-4)
             assert torch.allclose(b_logits_0[1, -1, :], l_logits_0[0, -1, :], atol=1e-5, rtol=1e-4)
+
+
+# =====================================================================
+# Stage 2 Tests: Inference Engine generate_batch()
+# =====================================================================
+
+from src.inference.engine import (
+    TouchlineInferenceEngine,
+    BatchRequest,
+    BatchGenerationItem,
+    BatchGenerationOutput,
+)
+from src.tokenizer.bpe_tokenizer import TouchlineBPETokenizer
+
+
+@pytest.fixture
+def test_engine() -> TouchlineInferenceEngine:
+    """Fixture providing an inference engine with trained checkpoint and real tokenizer."""
+    checkpoint_path = "checkpoints/final_model.pt"
+    tokenizer_dir = "configs/tokenizer"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    return TouchlineInferenceEngine.load_from_checkpoint(
+        checkpoint_path=checkpoint_path,
+        tokenizer_dir=tokenizer_dir,
+        device=device,
+    )
+
+
+def test_generate_batch_homogeneous(test_engine: TouchlineInferenceEngine):
+    """
+    Homogeneous batch of identical prompts with greedy decoding must yield
+    identical generated text across all batch rows.
+    """
+    prompt = "The quick brown fox"
+    batch_size = 4
+    requests = [
+        BatchRequest(prompt=prompt, max_new_tokens=15, temperature=0.0)
+        for _ in range(batch_size)
+    ]
+
+    out = test_engine.generate_batch(requests, cache_type="dynamic")
+
+    assert out.batch_size == batch_size
+    assert out.successful_requests == batch_size
+    assert out.failed_requests == 0
+    assert len(out.items) == batch_size
+
+    first_text = out.items[0].generated_text
+    assert len(first_text) > 0
+    for item in out.items[1:]:
+        assert item.generated_text == first_text
+        assert item.new_tokens == 15
+        assert item.status == "ok"
+
+
+def test_generate_batch_heterogeneous_prompt_lengths_equivalence(test_engine: TouchlineInferenceEngine):
+    """
+    Batched generation with heterogeneous prompt lengths (left-padding) must produce
+    greedy outputs identical to sequential single-request generate().
+    """
+    prompts = [
+        "Hello",
+        "The match was intense from the opening whistle",
+        "Tactical analysis indicates that midfield pressing",
+    ]
+
+    # Run single-request generation for each prompt
+    single_outputs = []
+    for p in prompts:
+        single_res = test_engine.generate(
+            prompt=p,
+            max_new_tokens=20,
+            temperature=0.0,
+            use_cache=True,
+            cache_type="dynamic",
+        )
+        single_outputs.append(single_res.generated_text)
+
+    # Run batched generation
+    batch_reqs = [
+        BatchRequest(prompt=p, max_new_tokens=20, temperature=0.0)
+        for p in prompts
+    ]
+    batch_out = test_engine.generate_batch(batch_reqs, cache_type="dynamic")
+
+    assert batch_out.successful_requests == len(prompts)
+    for b, expected_text in enumerate(single_outputs):
+        assert batch_out.items[b].generated_text == expected_text, (
+            f"Row {b} text mismatch:\n"
+            f"Expected (single): {expected_text!r}\n"
+            f"Got (batch):      {batch_out.items[b].generated_text!r}"
+        )
+
+
+def test_generate_batch_static_cache_equivalence(test_engine: TouchlineInferenceEngine):
+    """
+    Batched generation with cache_type='static' must produce results identical
+    to cache_type='dynamic'.
+    """
+    prompts = [
+        "In the final minutes of extra time",
+        "A counter-attack began",
+    ]
+    reqs = [
+        BatchRequest(prompt=p, max_new_tokens=15, temperature=0.0)
+        for p in prompts
+    ]
+
+    out_dynamic = test_engine.generate_batch(reqs, cache_type="dynamic")
+    out_static = test_engine.generate_batch(reqs, cache_type="static")
+
+    for b in range(len(prompts)):
+        assert out_static.items[b].generated_text == out_dynamic.items[b].generated_text
+        assert out_static.items[b].new_tokens == out_dynamic.items[b].new_tokens
+
+
+def test_generate_batch_uncached_equivalence(test_engine: TouchlineInferenceEngine):
+    """
+    Batched generation with cache_type='none' must match cache_type='dynamic'.
+    """
+    prompts = [
+        "Defense organized",
+        "The goalkeeper made an incredible save",
+    ]
+    reqs = [
+        BatchRequest(prompt=p, max_new_tokens=10, temperature=0.0)
+        for p in prompts
+    ]
+
+    out_dynamic = test_engine.generate_batch(reqs, cache_type="dynamic")
+    out_uncached = test_engine.generate_batch(reqs, cache_type="none")
+
+    for b in range(len(prompts)):
+        assert out_uncached.items[b].generated_text == out_dynamic.items[b].generated_text
+
+
+def test_generate_batch_independent_eos_and_lengths(test_engine: TouchlineInferenceEngine):
+    """
+    Requests with different max_new_tokens and early EOS termination must
+    complete independently without disrupting active rows.
+    """
+    reqs = [
+        BatchRequest(prompt="Short prompt", max_new_tokens=5, temperature=0.0),
+        BatchRequest(prompt="Longer prompt running more tokens", max_new_tokens=25, temperature=0.0),
+    ]
+
+    out = test_engine.generate_batch(reqs, cache_type="dynamic")
+    assert out.items[0].new_tokens <= 5
+    assert out.items[1].new_tokens <= 25
+
+
+def test_generate_batch_per_request_seeds():
+    """
+    Verify seed reproducibility per request row.
+    """
+    checkpoint_path = "checkpoints/final_model.pt"
+    tokenizer_dir = "configs/tokenizer"
+    engine = TouchlineInferenceEngine.load_from_checkpoint(
+        checkpoint_path=checkpoint_path,
+        tokenizer_dir=tokenizer_dir,
+        device="cpu",
+    )
+
+    reqs_1 = [
+        BatchRequest(prompt="The game", max_new_tokens=15, temperature=0.8, seed=123),
+        BatchRequest(prompt="The match", max_new_tokens=15, temperature=0.8, seed=456),
+    ]
+    reqs_2 = [
+        BatchRequest(prompt="The game", max_new_tokens=15, temperature=0.8, seed=123),
+        BatchRequest(prompt="The match", max_new_tokens=15, temperature=0.8, seed=456),
+    ]
+
+    out1 = engine.generate_batch(reqs_1, cache_type="dynamic")
+    out2 = engine.generate_batch(reqs_2, cache_type="dynamic")
+
+    assert out1.items[0].generated_text == out2.items[0].generated_text
+    assert out1.items[1].generated_text == out2.items[1].generated_text
+
+
+def test_generate_batch_context_limit_error(test_engine: TouchlineInferenceEngine):
+    """
+    Requests exceeding max_seq_len should be marked status='error' while
+    valid requests in the batch proceed successfully.
+    """
+    max_len = test_engine.model.config.max_seq_len
+    valid_req = BatchRequest(prompt="Valid short prompt", max_new_tokens=10, temperature=0.0)
+    oversized_req = BatchRequest(
+        prompt="Valid prompt",
+        max_new_tokens=max_len + 10,
+        temperature=0.0,
+    )
+
+    out = test_engine.generate_batch([valid_req, oversized_req], cache_type="dynamic")
+
+    assert out.batch_size == 2
+    assert out.successful_requests == 1
+    assert out.failed_requests == 1
+
+    assert out.items[0].status == "ok"
+    assert out.items[0].new_tokens == 10
+
+    assert out.items[1].status == "error"
+    assert "Context limit exceeded" in str(out.items[1].error)
+    assert out.items[1].new_tokens == 0
+
+
+def test_generate_batch_string_inputs(test_engine: TouchlineInferenceEngine):
+    """
+    generate_batch must accept raw string prompts and use default BatchRequest options.
+    """
+    prompts = ["First query", "Second query"]
+    out = test_engine.generate_batch(prompts, cache_type="dynamic")
+    assert out.batch_size == 2
+    assert out.successful_requests == 2
+    for item in out.items:
+        assert item.status == "ok"
+        assert len(item.generated_text) > 0
+
+
+def test_generate_batch_max_batch_size_guard(test_engine: TouchlineInferenceEngine):
+    """
+    generate_batch raises ValueError when batch size exceeds max_batch_size.
+    """
+    reqs = ["Prompt 1", "Prompt 2", "Prompt 3"]
+    with pytest.raises(ValueError, match="exceeds maximum configured batch size"):
+        test_engine.generate_batch(reqs, max_batch_size=2)
