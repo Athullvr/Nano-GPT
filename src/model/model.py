@@ -86,6 +86,8 @@ class TouchlineNanoGPT(nn.Module):
         targets: Optional[torch.Tensor] = None,
         past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         use_cache: bool = False,
+        attn_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
     ) -> Union[
         Tuple[torch.Tensor, Optional[torch.Tensor]],
         Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]],
@@ -130,19 +132,21 @@ class TouchlineNanoGPT(nn.Module):
         x = self.token_embedding(idx)
         x = self.dropout(x)
 
-        # Compute RoPE cos, sin tensors for length T with position offset: [1, 1, T, head_dim]
-        cos, sin = self.rope(x, seq_len=T, offset=past_length)
+        # Compute RoPE cos, sin tensors for length T with position offset or per-token position_ids
+        cos, sin = self.rope(x, seq_len=T, offset=past_length, position_ids=position_ids)
 
         # Pass through Transformer blocks
         presents = [] if use_cache else None
         for i, block in enumerate(self.blocks):
             layer_past = past_key_values[i] if past_key_values is not None else None
             if use_cache:
-                x, present = block(x, cos=cos, sin=sin, layer_past=layer_past, use_cache=True)
+                x, present = block(
+                    x, cos=cos, sin=sin, attn_mask=attn_mask, layer_past=layer_past, use_cache=True
+                )
                 if presents is not None:
                     presents.append(present)
             else:
-                x = block(x, cos=cos, sin=sin)
+                x = block(x, cos=cos, sin=sin, attn_mask=attn_mask)
 
         # Advance preallocated static cache sequence counter if applicable
         if use_cache and hasattr(past_key_values, "advance"):
